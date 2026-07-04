@@ -23,6 +23,66 @@ import 'package:image_cropper/image_cropper.dart';
 import 'package:image/image.dart' as img;
 import 'package:http/http.dart' as http;
 import 'config/app_config.dart';
+import 'package:sqflite/sqflite.dart';
+import 'package:path/path.dart' as p;
+
+// =========================================================
+// COFRE BLINDADO LOCAL (SQLite para Android/iOS | SharedPreferences para Web)
+// =========================================================
+class BancoLocal {
+  static Database? _db;
+
+  static Future<Database> get db async {
+    if (_db != null) return _db!;
+    if (kIsWeb) throw Exception("Sqflite não roda na Web.");
+    String caminho = p.join(await getDatabasesPath(), 'fila_leituras_mc.db');
+    _db = await openDatabase(
+      caminho,
+      version: 1,
+      onCreate: (banco, versao) async {
+        await banco.execute(
+          'CREATE TABLE fila (id INTEGER PRIMARY KEY AUTOINCREMENT, dados TEXT)',
+        );
+      },
+    );
+    return _db!;
+  }
+
+  static Future<void> salvar(String jsonStr) async {
+    if (kIsWeb) {
+      final prefs = await SharedPreferences.getInstance();
+      final fila = prefs.getStringList('fila_leituras') ?? [];
+      fila.add(jsonStr);
+      await prefs.setStringList('fila_leituras', fila);
+    } else {
+      final banco = await db;
+      await banco.insert('fila', {'dados': jsonStr});
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> lerFila() async {
+    if (kIsWeb) {
+      final prefs = await SharedPreferences.getInstance();
+      final fila = prefs.getStringList('fila_leituras') ?? [];
+      return List.generate(fila.length, (i) => {'id': i, 'dados': fila[i]});
+    } else {
+      final banco = await db;
+      return await banco.query('fila', orderBy: 'id ASC');
+    }
+  }
+
+  static Future<void> remover(int id, String dadosJson) async {
+    if (kIsWeb) {
+      final prefs = await SharedPreferences.getInstance();
+      List<String> fila = prefs.getStringList('fila_leituras') ?? [];
+      fila.remove(dadosJson);
+      await prefs.setStringList('fila_leituras', fila);
+    } else {
+      final banco = await db;
+      await banco.delete('fila', where: 'id = ?', whereArgs: [id]);
+    }
+  }
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -255,12 +315,6 @@ class _EcraLoginState extends State<EcraLogin> {
   }
 }
 
-// ============================================================
-//  TELA DE ROTEIROS — REDESIGN UX
-//  Substitui completamente a classe TelaCondominios original.
-//  Mantém toda a lógica de negócio (sync, fila, Firebase).
-// ============================================================
-
 class TelaCondominios extends StatefulWidget {
   final String idAdministradora;
   const TelaCondominios({super.key, required this.idAdministradora});
@@ -271,17 +325,14 @@ class TelaCondominios extends StatefulWidget {
 
 class _TelaCondominiosState extends State<TelaCondominios>
     with TickerProviderStateMixin {
-  // --- Estado de sincronização ---
   Timer? _timerSync;
   bool _sincronizandoAgora = false;
   int _totalPendentes = 0;
   bool _isOnline = true;
 
-  // --- Animações ---
   late AnimationController _fadeCtrl;
   late Animation<double> _fadeAnim;
 
-  // --- Paleta de cores do app ---
   static const Color _azulPrimario = Color(0xFF0D47A1);
   static const Color _azulEscuro = Color(0xFF1A237E);
   static const Color _laranja = Color(0xFFE65100);
@@ -300,8 +351,10 @@ class _TelaCondominiosState extends State<TelaCondominios>
 
     _carregarPendentes();
     _sincronizarSilenciosamente();
+
+    // 👇 RELÓGIO AJUSTADO PARA 15 SEGUNDOS
     _timerSync = Timer.periodic(
-      const Duration(minutes: 1),
+      const Duration(seconds: 15),
       (_) => _sincronizarSilenciosamente(),
     );
   }
@@ -313,27 +366,25 @@ class _TelaCondominiosState extends State<TelaCondominios>
     super.dispose();
   }
 
-  // --- Lê a fila local e atualiza o contador de pendentes ---
   Future<void> _carregarPendentes() async {
-    final prefs = await SharedPreferences.getInstance();
-    final fila = prefs.getStringList('fila_leituras') ?? [];
+    final fila = await BancoLocal.lerFila();
     if (mounted) setState(() => _totalPendentes = fila.length);
   }
 
-  // --- Sincronização silenciosa (lógica original preservada) ---
   Future<void> _sincronizarSilenciosamente() async {
     if (_sincronizandoAgora) return;
-    final prefs = await SharedPreferences.getInstance();
-    List<String> fila = prefs.getStringList('fila_leituras') ?? [];
+
+    final fila = await BancoLocal.lerFila();
     if (mounted) setState(() => _totalPendentes = fila.length);
     if (fila.isEmpty) return;
 
     setState(() => _sincronizandoAgora = true);
-    List<String> filaAtualizada = List.from(fila);
     int sucessoCount = 0;
 
-    for (String itemJson in fila) {
+    for (var linha in fila) {
       try {
+        int idLocal = linha['id'];
+        String itemJson = linha['dados'];
         Map<String, dynamic> dados = jsonDecode(itemJson);
         String? urlFotoFirebase;
         String? caminhoLocal = dados['caminho_foto_local'];
@@ -391,7 +442,8 @@ class _TelaCondominiosState extends State<TelaCondominios>
             .doc(idUnicoDoc)
             .set(pacote, SetOptions(merge: true));
 
-        filaAtualizada.remove(itemJson);
+        // Só remove do SQLite SE e QUANDO a nuvem confirmar recebimento
+        await BancoLocal.remover(idLocal, itemJson);
         sucessoCount++;
       } catch (e) {
         debugPrint("Falha ao sincronizar: $e");
@@ -399,11 +451,11 @@ class _TelaCondominiosState extends State<TelaCondominios>
       }
     }
 
-    await prefs.setStringList('fila_leituras', filaAtualizada);
+    final novaFila = await BancoLocal.lerFila();
     if (mounted) {
       setState(() {
         _sincronizandoAgora = false;
-        _totalPendentes = filaAtualizada.length;
+        _totalPendentes = novaFila.length;
         if (sucessoCount > 0) _isOnline = true;
       });
       if (sucessoCount > 0) {
@@ -428,26 +480,22 @@ class _TelaCondominiosState extends State<TelaCondominios>
     );
   }
 
-  // --- Calcula progresso do prédio (leituras salvas este mês) ---
   Future<int> _buscarProgresso(
     String nomePredio,
     List<dynamic> apartamentos,
     List<dynamic> medidores,
   ) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final fila = prefs.getStringList('fila_leituras') ?? [];
+      final fila = await BancoLocal.lerFila();
       final hoje = DateTime.now();
 
-      // Conta leituras locais (offline) deste mês para este prédio
       int localCount = fila.where((item) {
-        final dados = jsonDecode(item) as Map<String, dynamic>;
+        final dados = jsonDecode(item['dados']) as Map<String, dynamic>;
         if (dados['condominio'] != nomePredio) return false;
         final data = DateTime.parse(dados['data_hora_string']);
         return data.month == hoje.month && data.year == hoje.year;
       }).length;
 
-      // Conta leituras na nuvem (online) deste mês
       final query = await FirebaseFirestore.instance
           .collection('leituras')
           .where('condominio', isEqualTo: nomePredio)
@@ -479,7 +527,6 @@ class _TelaCondominiosState extends State<TelaCondominios>
         opacity: _fadeAnim,
         child: CustomScrollView(
           slivers: [
-            // ── App Bar colapsável ──────────────────────────────────
             SliverAppBar(
               expandedHeight: 110,
               floating: false,
@@ -534,8 +581,6 @@ class _TelaCondominiosState extends State<TelaCondominios>
                 ),
               ),
             ),
-
-            // ── Status Bar (conexão + pendentes) ───────────────────
             SliverToBoxAdapter(
               child: _StatusBar(
                 isOnline: _isOnline,
@@ -548,8 +593,6 @@ class _TelaCondominiosState extends State<TelaCondominios>
                 ).then((_) => _carregarPendentes()),
               ),
             ),
-
-            // ── Banner de pendentes (visível apenas quando há itens) ─
             if (_totalPendentes > 0)
               SliverToBoxAdapter(
                 child: _BannerPendentes(
@@ -564,8 +607,6 @@ class _TelaCondominiosState extends State<TelaCondominios>
                   ).then((_) => _carregarPendentes()),
                 ),
               ),
-
-            // ── Lista de prédios ────────────────────────────────────
             StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
                   .collection('predios')
@@ -652,9 +693,6 @@ class _TelaCondominiosState extends State<TelaCondominios>
   }
 }
 
-// ================================================================
-//  WIDGET — Status Bar (conexão + sincronização)
-// ================================================================
 class _StatusBar extends StatelessWidget {
   final bool isOnline;
   final bool sincronizando;
@@ -677,7 +715,6 @@ class _StatusBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
       child: Row(
         children: [
-          // Pill de conexão
           _Pill(
             icon: isOnline ? Icons.wifi_rounded : Icons.wifi_off_rounded,
             label: isOnline ? 'Online' : 'Offline',
@@ -687,8 +724,6 @@ class _StatusBar extends StatelessWidget {
                 : Colors.red.withOpacity(0.15),
           ),
           const SizedBox(width: 8),
-
-          // Pill de sincronização
           if (sincronizando)
             _Pill(
               icon: Icons.sync_rounded,
@@ -714,10 +749,7 @@ class _StatusBar extends StatelessWidget {
               cor: Colors.green.shade300,
               fundo: Colors.green.withOpacity(0.15),
             ),
-
           const Spacer(),
-
-          // Botão de sync manual
           if (!sincronizando && pendentes > 0)
             GestureDetector(
               onTap: onSincronizar,
@@ -788,9 +820,6 @@ class _Pill extends StatelessWidget {
   }
 }
 
-// ================================================================
-//  WIDGET — Banner de pendentes
-// ================================================================
 class _BannerPendentes extends StatelessWidget {
   final int total;
   final bool sincronizando;
@@ -894,9 +923,6 @@ class _BannerPendentes extends StatelessWidget {
   }
 }
 
-// ================================================================
-//  WIDGET — Cartão de prédio com barra de progresso
-// ================================================================
 class _CartaoPredio extends StatelessWidget {
   final String nome;
   final List<dynamic> medidores;
@@ -944,7 +970,6 @@ class _CartaoPredio extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Linha superior: ícone + nome + seta
               Row(
                 children: [
                   Container(
@@ -975,7 +1000,6 @@ class _CartaoPredio extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 3),
-                        // Chips de medidores
                         Row(
                           children: medidores.map<Widget>((m) {
                             return Padding(
@@ -1000,12 +1024,9 @@ class _CartaoPredio extends StatelessWidget {
                   ),
                 ],
               ),
-
               const SizedBox(height: 14),
               const Divider(height: 1, color: Color(0xFFF0F0F0)),
               const SizedBox(height: 14),
-
-              // Barra de progresso
               FutureBuilder<int>(
                 future: progressoFuture,
                 builder: (context, snap) {
@@ -1079,9 +1100,6 @@ class _CartaoPredio extends StatelessWidget {
   }
 }
 
-// ================================================================
-//  WIDGET — Estado vazio
-// ================================================================
 class _EstadoVazio extends StatelessWidget {
   const _EstadoVazio();
 
@@ -1132,6 +1150,8 @@ class _EstadoVazio extends StatelessWidget {
   }
 }
 
+enum StatusLeitura { pendente, lendo, lido }
+
 class TelaLeituraPageView extends StatefulWidget {
   final String condominio;
   final List<dynamic> medidores;
@@ -1149,26 +1169,152 @@ class TelaLeituraPageView extends StatefulWidget {
 }
 
 class _TelaLeituraPageViewState extends State<TelaLeituraPageView> {
-  final PageController _pageController = PageController();
+  late PageController _pageController;
   String? medidorGlobal;
+  int _paginaAtual = 0;
+
+  Map<String, StatusLeitura> statusApartamentos = {};
 
   @override
   void initState() {
     super.initState();
-    if (widget.medidores.isNotEmpty)
+    _pageController = PageController(initialPage: 0);
+    if (widget.medidores.isNotEmpty) {
       medidorGlobal = widget.medidores.first.toString();
+    }
+
+    for (var apto in widget.apartamentos) {
+      statusApartamentos[apto.toString()] = StatusLeitura.pendente;
+    }
+    if (widget.apartamentos.isNotEmpty) {
+      statusApartamentos[widget.apartamentos.first.toString()] =
+          StatusLeitura.lendo;
+    }
   }
 
-  void _avancarParaProximoApto() {
-    if (_pageController.page != null &&
-        _pageController.page! < widget.apartamentos.length - 1) {
+  void _irParaAnterior() {
+    if (_paginaAtual > 0) {
+      _pageController.previousPage(
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeInOut,
+      );
+    }
+  }
+
+  void _irParaProximo() {
+    if (_paginaAtual < widget.apartamentos.length - 1) {
       _pageController.nextPage(
-        duration: const Duration(milliseconds: 300),
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeInOut,
+      );
+    }
+  }
+
+  void _onLeituraSalva() {
+    setState(() {
+      statusApartamentos[widget.apartamentos[_paginaAtual].toString()] =
+          StatusLeitura.lido;
+    });
+
+    if (_paginaAtual < widget.apartamentos.length - 1) {
+      _pageController.nextPage(
+        duration: const Duration(milliseconds: 250),
         curve: Curves.easeInOut,
       );
     } else {
       Navigator.pop(context);
     }
+  }
+
+  void _abrirMenuLista() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        height: MediaQuery.of(context).size.height * 0.7,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  "Lista de Apartamentos",
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+            const Divider(),
+            Expanded(
+              child: GridView.builder(
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 4,
+                  crossAxisSpacing: 10,
+                  mainAxisSpacing: 10,
+                  childAspectRatio: 1.2,
+                ),
+                itemCount: widget.apartamentos.length,
+                itemBuilder: (context, index) {
+                  String apto = widget.apartamentos[index].toString();
+                  StatusLeitura status =
+                      statusApartamentos[apto] ?? StatusLeitura.pendente;
+
+                  Color bgColor;
+                  Color textColor = Colors.black87;
+
+                  if (status == StatusLeitura.lido) {
+                    bgColor = Colors.green.shade100;
+                    textColor = Colors.green.shade900;
+                  } else if (status == StatusLeitura.lendo) {
+                    bgColor = Colors.amber.shade100;
+                    textColor = Colors.amber.shade900;
+                  } else {
+                    bgColor = Colors.grey.shade200;
+                  }
+
+                  return InkWell(
+                    onTap: () {
+                      _pageController.jumpToPage(index);
+                      Navigator.pop(context);
+                    },
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: bgColor,
+                        borderRadius: BorderRadius.circular(8),
+                        border: _paginaAtual == index
+                            ? Border.all(
+                                color: const Color(0xFF0D47A1),
+                                width: 2,
+                              )
+                            : null,
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        apto,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: textColor,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -1179,31 +1325,86 @@ class _TelaLeituraPageViewState extends State<TelaLeituraPageView> {
 
   @override
   Widget build(BuildContext context) {
+    const azul = Color(0xFF0D47A1);
+    final total = widget.apartamentos.length;
+
     return Scaffold(
+      backgroundColor: const Color(0xFFF5F6FA),
       appBar: AppBar(
-        title: Text(
-          widget.condominio,
-          style: const TextStyle(color: Colors.white, fontSize: 18),
+        backgroundColor: azul,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
         ),
-        backgroundColor: const Color(0xFF0D47A1),
-        iconTheme: const IconThemeData(color: Colors.white),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.condominio,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            Text(
+              'Apto ${_paginaAtual + 1} de $total',
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: _abrirMenuLista,
+            icon: const Icon(
+              Icons.grid_view_rounded,
+              color: Colors.white,
+              size: 20,
+            ),
+            label: const Text(
+              "Lista",
+              style: TextStyle(color: Colors.white, fontSize: 14),
+            ),
+          ),
+        ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(3),
+          child: LinearProgressIndicator(
+            value: total > 0 ? (_paginaAtual + 1) / total : 0,
+            backgroundColor: Colors.white24,
+            valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+            minHeight: 3,
+          ),
+        ),
       ),
       body: PageView.builder(
         controller: _pageController,
+        onPageChanged: (index) {
+          setState(() {
+            _paginaAtual = index;
+            String aptoAtual = widget.apartamentos[index].toString();
+            if (statusApartamentos[aptoAtual] == StatusLeitura.pendente) {
+              statusApartamentos[aptoAtual] = StatusLeitura.lendo;
+            }
+          });
+        },
         itemCount: widget.apartamentos.length,
         itemBuilder: (context, index) {
-          String aptoAtual = widget.apartamentos[index].toString();
+          final aptoAtual = widget.apartamentos[index].toString();
           return ApartamentoLeituraPage(
             condominio: widget.condominio,
             apartamento: aptoAtual,
             medidores: widget.medidores,
             medidorSelecionado: medidorGlobal,
-            onMedidorAlterado: (novoMedidor) {
-              setState(() {
-                medidorGlobal = novoMedidor;
-              });
-            },
-            onSalvo: _avancarParaProximoApto,
+            indiceAtual: index,
+            totalAptos: total,
+            onMedidorAlterado: (novo) => setState(() => medidorGlobal = novo),
+            onSalvo: _onLeituraSalva,
+            onAnterior: _irParaAnterior,
+            onProximo: _irParaProximo,
+            isPrimeiro: index == 0,
+            isUltimo: index == total - 1,
           );
         },
       ),
@@ -1216,8 +1417,15 @@ class ApartamentoLeituraPage extends StatefulWidget {
   final String apartamento;
   final List<dynamic> medidores;
   final String? medidorSelecionado;
+  final int indiceAtual;
+  final int totalAptos;
   final Function(String) onMedidorAlterado;
+
   final VoidCallback onSalvo;
+  final VoidCallback onAnterior;
+  final VoidCallback onProximo;
+  final bool isPrimeiro;
+  final bool isUltimo;
 
   const ApartamentoLeituraPage({
     super.key,
@@ -1225,8 +1433,14 @@ class ApartamentoLeituraPage extends StatefulWidget {
     required this.apartamento,
     required this.medidores,
     required this.medidorSelecionado,
+    required this.indiceAtual,
+    required this.totalAptos,
     required this.onMedidorAlterado,
     required this.onSalvo,
+    required this.onAnterior,
+    required this.onProximo,
+    required this.isPrimeiro,
+    required this.isUltimo,
   });
 
   @override
@@ -1235,22 +1449,28 @@ class ApartamentoLeituraPage extends StatefulWidget {
 
 class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
     with AutomaticKeepAliveClientMixin {
+  static const Color _azul = Color(0xFF0D47A1);
+  static const Color _laranja = Color(0xFFE65100);
+
   double? leituraAnterior;
   String referenciaAnterior = '--/----';
   bool carregandoLeitura = true;
   double? leituraAtual;
   double? consumoCalculado;
-  final ImagePicker _picker = ImagePicker();
-  XFile? fotoComprovante;
-  bool salvando = false;
   bool modoEdicao = false;
-
-  // Variáveis da IA e da Chave Mestra
-  bool processandoIA = false;
+  String? idLeituraExistente;
   bool houveTrocaOuCorrecao = false;
 
-  String? idLeituraExistente;
-  final TextEditingController leituraAtualController = TextEditingController();
+  final ImagePicker _picker = ImagePicker();
+  XFile? fotoComprovante;
+
+  bool salvando = false;
+  bool processandoIA = false;
+
+  final TextEditingController _leituraCtrl = TextEditingController();
+
+  // 👇 1. CRIADO O GESTOR DE FOCO DO TECLADO
+  final FocusNode _focusNode = FocusNode();
 
   @override
   bool get wantKeepAlive => true;
@@ -1259,44 +1479,65 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
   void initState() {
     super.initState();
     if (widget.medidores.isNotEmpty) _buscarLeituraAnterior();
+
+    // 👇 Chama o teclado automaticamente na primeira vez que abre o app
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted) _focusNode.requestFocus();
+    });
   }
 
   @override
-  void didUpdateWidget(ApartamentoLeituraPage oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.medidorSelecionado != widget.medidorSelecionado) {
-      leituraAtualController.clear();
-      consumoCalculado = null;
-      fotoComprovante = null;
-      leituraAnterior = null;
-      referenciaAnterior = '--/----';
-      modoEdicao = false;
-      houveTrocaOuCorrecao = false; // Reseta a chave mestra ao mudar de medidor
+  void didUpdateWidget(ApartamentoLeituraPage old) {
+    super.didUpdateWidget(old);
+
+    // 👇 2. SE MUDOU DE MEDIDOR OU DE APARTAMENTO
+    if (old.medidorSelecionado != widget.medidorSelecionado ||
+        old.apartamento != widget.apartamento) {
+      setState(() {
+        leituraAnterior = null;
+        referenciaAnterior = '--/----';
+        carregandoLeitura = true;
+
+        // 🧹 LIMPEZA OBRIGATÓRIA (Apaga o que foi digitado no medidor/apto anterior)
+        _leituraCtrl.clear();
+        leituraAtual = null;
+        consumoCalculado = null;
+        houveTrocaOuCorrecao = false;
+      });
       _buscarLeituraAnterior();
+
+      // ⌨️ SOBE O TECLADO AUTOMATICAMENTE NA TROCA
+      Future.delayed(const Duration(milliseconds: 150), () {
+        if (mounted) _focusNode.requestFocus();
+      });
     }
   }
 
   @override
   void dispose() {
-    leituraAtualController.dispose();
+    _focusNode.dispose(); // Elimina o foco da memória para não vazar
+    _leituraCtrl.dispose();
     super.dispose();
   }
 
-  String _nomeMedidorBonito(String id) {
+  String _nomeMedidor(String id) {
     if (id == 'agua') return 'Água';
     if (id == 'gas') return 'Gás';
     if (id == 'energia') return 'Luz';
     return id.toUpperCase();
   }
 
+  String _unidadeMedidor(String id) {
+    if (id == 'energia') return 'kWh';
+    return 'm³';
+  }
+
   Future<void> _buscarLeituraAnterior() async {
     if (widget.medidorSelecionado == null) return;
-    setState(() {
-      carregandoLeitura = true;
-    });
+    setState(() => carregandoLeitura = true);
 
     try {
-      String nomeMedidor = _nomeMedidorBonito(widget.medidorSelecionado!);
+      final nomeMedidor = _nomeMedidor(widget.medidorSelecionado!);
       final query = await FirebaseFirestore.instance
           .collection('leituras')
           .where('condominio', isEqualTo: widget.condominio)
@@ -1304,83 +1545,77 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
           .get(const GetOptions(source: Source.serverAndCache))
           .timeout(const Duration(seconds: 5));
 
-      if (query.docs.isNotEmpty) {
-        var documentos = query.docs.where((doc) {
-          var dados = doc.data() as Map<String, dynamic>;
-          return dados['medidor'].toString().contains(nomeMedidor);
-        }).toList();
-
-        if (documentos.isEmpty) {
-          setState(() {
-            leituraAnterior = 0.0;
-            referenciaAnterior = 'Novo';
-            carregandoLeitura = false;
-          });
-          return;
-        }
-
-        documentos.sort((a, b) {
-          Timestamp dataA =
-              (a.data() as Map<String, dynamic>)['data_hora'] as Timestamp;
-          Timestamp dataB =
-              (b.data() as Map<String, dynamic>)['data_hora'] as Timestamp;
-          return dataB.compareTo(dataA);
-        });
-
-        var docMaisRecente = documentos.first;
-        var dadosMaisRecentes = docMaisRecente.data() as Map<String, dynamic>;
-        DateTime dataDaLeitura = (dadosMaisRecentes['data_hora'] as Timestamp)
-            .toDate();
-        DateTime hoje = DateTime.now();
-
-        if (dataDaLeitura.month == hoje.month &&
-            dataDaLeitura.year == hoje.year) {
-          setState(() {
-            modoEdicao = true;
-            idLeituraExistente = docMaisRecente.id;
-            double valorSalvo = (dadosMaisRecentes['leitura_atual'] ?? 0.0)
-                .toDouble();
-            leituraAtualController.text = valorSalvo
-                .toStringAsFixed(3)
-                .replaceAll('.', ',');
-            if (documentos.length > 1) {
-              var docMesPassado = documentos.elementAt(1);
-              DateTime dataAnt =
-                  ((docMesPassado.data() as Map<String, dynamic>)['data_hora']
-                          as Timestamp)
-                      .toDate();
-              referenciaAnterior =
-                  '${dataAnt.month.toString().padLeft(2, '0')}/${dataAnt.year}';
-              leituraAnterior =
-                  ((docMesPassado.data()
-                              as Map<String, dynamic>)['leitura_atual'] ??
-                          0.0)
-                      .toDouble();
-            } else {
-              leituraAnterior = 0.0;
-              referenciaAnterior = 'Inicial';
-            }
-            carregandoLeitura = false;
-          });
-          _calcularConsumo(leituraAtualController.text);
-        } else {
-          setState(() {
-            modoEdicao = false;
-            referenciaAnterior =
-                '${dataDaLeitura.month.toString().padLeft(2, '0')}/${dataDaLeitura.year}';
-            leituraAnterior = (dadosMaisRecentes['leitura_atual'] ?? 0.0)
-                .toDouble();
-            carregandoLeitura = false;
-          });
-        }
-      } else {
+      if (query.docs.isEmpty) {
         setState(() {
           leituraAnterior = 0.0;
           referenciaAnterior = 'Inicial';
           carregandoLeitura = false;
         });
+        return;
       }
-    } catch (e) {
+
+      var docs = query.docs.where((doc) {
+        final d = doc.data() as Map<String, dynamic>;
+        return d['medidor'].toString().contains(nomeMedidor);
+      }).toList();
+
+      if (docs.isEmpty) {
+        setState(() {
+          leituraAnterior = 0.0;
+          referenciaAnterior = 'Novo';
+          carregandoLeitura = false;
+        });
+        return;
+      }
+
+      docs.sort((a, b) {
+        final ta = (a.data() as Map<String, dynamic>)['data_hora'] as Timestamp;
+        final tb = (b.data() as Map<String, dynamic>)['data_hora'] as Timestamp;
+        return tb.compareTo(ta);
+      });
+
+      final recente = docs.first;
+      final dadosRecentes = recente.data() as Map<String, dynamic>;
+      final dataLeitura = (dadosRecentes['data_hora'] as Timestamp).toDate();
+      final hoje = DateTime.now();
+
+      if (dataLeitura.month == hoje.month && dataLeitura.year == hoje.year) {
+        setState(() {
+          modoEdicao = true;
+          idLeituraExistente = recente.id;
+          final valorSalvo = (dadosRecentes['leitura_atual'] ?? 0.0).toDouble();
+          _leituraCtrl.text = valorSalvo
+              .toStringAsFixed(3)
+              .replaceAll('.', ',');
+          if (docs.length > 1) {
+            final anterior = docs.elementAt(1);
+            final dataAnt =
+                ((anterior.data() as Map<String, dynamic>)['data_hora']
+                        as Timestamp)
+                    .toDate();
+            referenciaAnterior =
+                '${dataAnt.month.toString().padLeft(2, '0')}/${dataAnt.year}';
+            leituraAnterior =
+                ((anterior.data() as Map<String, dynamic>)['leitura_atual'] ??
+                        0.0)
+                    .toDouble();
+          } else {
+            leituraAnterior = 0.0;
+            referenciaAnterior = 'Inicial';
+          }
+          carregandoLeitura = false;
+        });
+        _calcularConsumo(_leituraCtrl.text);
+      } else {
+        setState(() {
+          modoEdicao = false;
+          referenciaAnterior =
+              '${dataLeitura.month.toString().padLeft(2, '0')}/${dataLeitura.year}';
+          leituraAnterior = (dadosRecentes['leitura_atual'] ?? 0.0).toDouble();
+          carregandoLeitura = false;
+        });
+      }
+    } catch (_) {
       setState(() {
         leituraAnterior = null;
         referenciaAnterior = 'Offline';
@@ -1389,70 +1624,49 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
     }
   }
 
-  void _calcularConsumo(String valorDigitado) {
-    if (valorDigitado.isEmpty) {
-      setState(() {
-        consumoCalculado = null;
-      });
+  void _calcularConsumo(String valor) {
+    if (valor.isEmpty) {
+      setState(() => consumoCalculado = null);
       return;
     }
-    double? valorConvertido = double.tryParse(
-      valorDigitado.replaceAll(',', '.'),
-    );
-    if (valorConvertido != null) {
+    final v = double.tryParse(valor.replaceAll(',', '.'));
+    if (v != null) {
       setState(() {
-        leituraAtual = valorConvertido;
-        if (leituraAnterior != null)
-          consumoCalculado = valorConvertido - leituraAnterior!;
+        leituraAtual = v;
+        if (leituraAnterior != null) consumoCalculado = v - leituraAnterior!;
       });
     }
   }
 
-  Future<void> _tirarFoto() async {
-    final XFile? fotoTirada = await _picker.pickImage(
+  Future<void> _tirarFotoManual() async {
+    final foto = await _picker.pickImage(
       source: ImageSource.camera,
-      imageQuality: 30,
+      imageQuality: 40,
     );
-    if (fotoTirada != null)
-      setState(() {
-        fotoComprovante = fotoTirada;
-      });
+    if (foto != null) setState(() => fotoComprovante = foto);
   }
 
-  // Importe este novo pacote no topo do ficheiro, se ainda não estiver lá:
-  // import 'package:image/image.dart' as img;
+  Future<void> _abrirGaleria() async {
+    final foto = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 40,
+    );
+    if (foto != null) setState(() => fotoComprovante = foto);
+  }
 
-  // Cole sua chave aqui (idealmente virá de uma variável de ambiente)
-  final uri = Uri.parse(
-    'https://vision.googleapis.com/v1/images:annotate?key=${AppConfig.cloudVisionApiKey}',
-  );
-
-  Future<void> _tirarFotoELerComIA() async {
-    final XFile? fotoOriginal = await _picker.pickImage(
+  Future<void> _lerComIA() async {
+    final fotoOriginal = await _picker.pickImage(
       source: ImageSource.camera,
       imageQuality: 90,
     );
-
-    if (AppConfig.cloudVisionApiKey.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Chave da API não configurada. Contate o suporte.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-      return;
-    }
     if (fotoOriginal == null) return;
 
-    // Recorte opcional — mantém a UX que você já tinha
-    CroppedFile? fotoCortada = await ImageCropper().cropImage(
+    final fotoCortada = await ImageCropper().cropImage(
       sourcePath: fotoOriginal.path,
       uiSettings: [
         AndroidUiSettings(
-          toolbarTitle: 'Foque apenas nos números',
-          toolbarColor: const Color(0xFF0D47A1),
+          toolbarTitle: 'Foque nos números',
+          toolbarColor: _azul,
           toolbarWidgetColor: Colors.white,
           initAspectRatio: CropAspectRatioPreset.ratio7x5,
           lockAspectRatio: false,
@@ -1460,22 +1674,22 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
         ),
       ],
     );
-
     if (fotoCortada == null) return;
 
     setState(() => processandoIA = true);
 
     try {
-      // 1. Lê a imagem e converte para base64
-      final Uint8List imageBytes = await fotoCortada.readAsBytes();
-      final String base64Image = base64Encode(imageBytes);
+      final bytes = await fotoCortada.readAsBytes();
+      final base64Image = base64Encode(bytes);
 
-      // 2. Chama a Cloud Vision API
+      if (AppConfig.cloudVisionApiKey.isEmpty) {
+        _toast('Chave da API não configurada.', Colors.red);
+        return;
+      }
+
       final uri = Uri.parse(
-        // CORRETO — usa a classe AppConfig:
         'https://vision.googleapis.com/v1/images:annotate?key=${AppConfig.cloudVisionApiKey}',
       );
-
       final response = await http.post(
         uri,
         headers: {'Content-Type': 'application/json'},
@@ -1495,153 +1709,220 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
       );
 
       if (response.statusCode != 200) {
-        debugPrint(
-          'Erro Vision API: ${response.statusCode} — ${response.body}',
-        );
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'Erro na API (${response.statusCode}). Tente novamente.',
-              ),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
+        _toast('Erro na API (${response.statusCode}).', Colors.red);
         return;
       }
 
-      // 3. Extrai o texto retornado
-      final Map<String, dynamic> data = jsonDecode(response.body);
-      final String textoCompleto =
-          data['responses']?[0]?['fullTextAnnotation']?['text'] ?? '';
+      final data = jsonDecode(response.body);
+      final texto = data['responses']?[0]?['fullTextAnnotation']?['text'] ?? '';
+      final numeros = texto.replaceAll(RegExp(r'[^0-9]'), '');
+      final medidor = widget.medidorSelecionado?.toLowerCase() ?? '';
+      String? resultado;
 
-      debugPrint('Cloud Vision retornou: $textoCompleto');
-
-      // 4. Limpa e interpreta os números
-      final String apenasNumeros = textoCompleto.replaceAll(
-        RegExp(r'[^0-9]'),
-        '',
-      );
-
-      String? resultadoIA;
-      String medidorAtual = widget.medidorSelecionado?.toLowerCase() ?? '';
-
-      if (apenasNumeros.isNotEmpty) {
-        if (medidorAtual.contains('gas')) {
-          // Gás: espera 8 dígitos — 5 inteiros + 3 decimais
-          if (apenasNumeros.length >= 8) {
-            final n = apenasNumeros.substring(0, 8);
-            resultadoIA = '${n.substring(0, 5)},${n.substring(5)}';
-          } else if (apenasNumeros.length >= 5) {
-            // Fallback: pega o que tem e completa com zeros
-            final inteiros = apenasNumeros.substring(
-              0,
-              apenasNumeros.length > 5 ? 5 : apenasNumeros.length,
-            );
-            resultadoIA = '${inteiros.padLeft(5, '0')},000';
-          }
-        } else if (medidorAtual.contains('agua')) {
-          // Água: espera 7 dígitos — 4 inteiros + 3 decimais
-          if (apenasNumeros.length >= 7) {
-            final n = apenasNumeros.substring(0, 7);
-            resultadoIA = '${n.substring(0, 4)},${n.substring(4)}';
-          } else if (apenasNumeros.length == 6) {
-            resultadoIA =
-                '${apenasNumeros.substring(0, 4)},${apenasNumeros.substring(4)}0';
-          } else if (apenasNumeros.length >= 4) {
-            final inteiros = apenasNumeros.substring(0, 4);
-            resultadoIA = '$inteiros,000';
-          }
-        } else {
-          // Energia ou genérico: pega os primeiros 8 dígitos
-          if (apenasNumeros.length >= 6) {
-            final n = apenasNumeros.substring(
-              0,
-              apenasNumeros.length > 8 ? 8 : apenasNumeros.length,
-            );
-            final meio = (n.length - 3).clamp(1, n.length);
-            resultadoIA =
-                '${n.substring(0, meio)},${n.substring(meio).padRight(3, '0')}';
+      if (numeros.isNotEmpty) {
+        if (medidor.contains('gas') && numeros.length >= 8) {
+          final n = numeros.substring(0, 8);
+          resultado = '${n.substring(0, 5)},${n.substring(5)}';
+        } else if (medidor.contains('agua')) {
+          if (numeros.length >= 7) {
+            final n = numeros.substring(0, 7);
+            resultado = '${n.substring(0, 4)},${n.substring(4)}';
+          } else if (numeros.length == 6) {
+            resultado = '${numeros.substring(0, 4)},${numeros.substring(4)}0';
           }
         }
-
-        // Fallback final: mostra o que veio para o leiturista corrigir
-        resultadoIA ??= apenasNumeros;
+        resultado ??= numeros;
       }
 
-      if (resultadoIA != null && resultadoIA.isNotEmpty) {
+      if (resultado != null) {
         setState(() {
-          leituraAtualController.text = resultadoIA!;
+          _leituraCtrl.text = resultado!;
           fotoComprovante = XFile(fotoCortada.path);
         });
-        _calcularConsumo(resultadoIA!);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('✅ Leitura capturada! Confirme se está correta.'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
+        _calcularConsumo(resultado);
+        _toast(
+          '✅ Leitura capturada! Confirme se está correta.',
+          Colors.green.shade700,
+        );
       } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                '⚠️ Não consegui ler os números. Tente aproximar mais ou digitar manualmente.',
-              ),
-              backgroundColor: Colors.orange,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      debugPrint('Erro no processamento da imagem: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro inesperado: $e'),
-            backgroundColor: Colors.red,
-          ),
+        _toast(
+          '⚠️ Não consegui ler. Tente digitar manualmente.',
+          Colors.orange.shade700,
         );
       }
+    } catch (e) {
+      _toast('Erro: $e', Colors.red);
     } finally {
       setState(() => processandoIA = false);
     }
   }
 
-  Future<void> _abrirGaleria() async {
-    final XFile? fotoEscolhida = await _picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 30,
-    );
-    if (fotoEscolhida != null)
-      setState(() {
-        fotoComprovante = fotoEscolhida;
-      });
+  void _verificarEGuardar() {
+    if (leituraAtual != null &&
+        leituraAnterior != null &&
+        leituraAnterior! > 0 &&
+        !houveTrocaOuCorrecao) {
+      double limiteDeAlerta = leituraAnterior! * 1.30;
+
+      if (leituraAtual! > limiteDeAlerta) {
+        if (fotoComprovante == null) {
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              title: Row(
+                children: const [
+                  Icon(Icons.camera_alt_rounded, color: Colors.red, size: 30),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Foto Obrigatória',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.red,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              content: Text(
+                'O consumo apurado é mais de 30% superior à leitura do mês passado.\n\n'
+                'Leitura Anterior: ${leituraAnterior!.toStringAsFixed(3).replaceAll('.', ',')}\n'
+                'Leitura Digitada: ${leituraAtual!.toStringAsFixed(3).replaceAll('.', ',')}\n\n'
+                'Para registrar um aumento tão expressivo, o sistema exige uma foto do medidor para fins de auditoria.',
+                style: const TextStyle(fontSize: 15),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text(
+                    'CANCELAR',
+                    style: TextStyle(
+                      color: Colors.grey,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _tirarFotoManual();
+                  },
+                  icon: const Icon(
+                    Icons.camera_alt,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                  label: const Text(
+                    'TIRAR FOTO',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red.shade700,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+          return;
+        } else {
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              title: Row(
+                children: const [
+                  Icon(
+                    Icons.warning_amber_rounded,
+                    color: Colors.orange,
+                    size: 30,
+                  ),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Confirmar Valor Alto',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ),
+              content: Text(
+                'A foto de auditoria está anexada, mas o consumo apurado é consideravelmente alto.\n\n'
+                'Confirma que o valor inserido (${leituraAtual!.toStringAsFixed(3).replaceAll('.', ',')}) bate exatamente com o visor do medidor físico?',
+                style: const TextStyle(fontSize: 15),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text(
+                    'CORRIGIR DÍGITO',
+                    style: TextStyle(
+                      color: Colors.grey,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _salvarNaCaixaDeSaida();
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange.shade700,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: const Text(
+                    'SIM, SALVAR',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+          return;
+        }
+      }
+    }
+
+    _salvarNaCaixaDeSaida();
   }
 
-  Future<void> _salvarDadosNaCaixaDeSaida() async {
-    setState(() {
-      salvando = true;
-    });
+  Future<void> _salvarNaCaixaDeSaida() async {
+    setState(() => salvando = true);
     try {
       String? caminhoFotoLocal;
       if (fotoComprovante != null && !kIsWeb) {
-        final diretorio = await getApplicationDocumentsDirectory();
-        final nomeArquivo = 'foto_${DateTime.now().millisecondsSinceEpoch}.jpg';
-        caminhoFotoLocal = '${diretorio.path}/$nomeArquivo';
-        final arquivoFisico = io.File(caminhoFotoLocal);
-        await arquivoFisico.writeAsBytes(await fotoComprovante!.readAsBytes());
+        final dir = await getApplicationDocumentsDirectory();
+        final nome = 'foto_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        caminhoFotoLocal = '${dir.path}/$nome';
+        await io.File(
+          caminhoFotoLocal,
+        ).writeAsBytes(await fotoComprovante!.readAsBytes());
       } else if (fotoComprovante != null && kIsWeb) {
         final bytes = await fotoComprovante!.readAsBytes();
-        caminhoFotoLocal = 'base64:' + base64Encode(bytes);
+        caminhoFotoLocal = 'base64:${base64Encode(bytes)}';
       }
 
-      Map<String, dynamic> leituraLocal = {
+      final leituraLocal = {
         'condominio': widget.condominio,
-        'medidor': _nomeMedidorBonito(widget.medidorSelecionado!),
+        'medidor': _nomeMedidor(widget.medidorSelecionado!),
         'apartamento': widget.apartamento,
         'leitura_anterior': leituraAnterior,
         'leitura_atual': leituraAtual,
@@ -1655,466 +1936,834 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
         'id_leitura_existente': idLeituraExistente,
       };
 
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      List<String> fila = prefs.getStringList('fila_leituras') ?? [];
-      fila.add(jsonEncode(leituraLocal));
-      await prefs.setStringList('fila_leituras', fila);
+      await BancoLocal.salvar(jsonEncode(leituraLocal));
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Salvo! Avançando...'),
-            backgroundColor: Color(0xFF0D47A1),
-            duration: Duration(seconds: 1),
-          ),
-        );
         setState(() {
           salvando = false;
           fotoComprovante = null;
         });
         widget.onSalvo();
       }
-    } catch (erro) {
-      setState(() {
-        salvando = false;
-      });
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao salvar no celular: $erro'),
-            backgroundColor: Colors.red,
-          ),
-        );
+    } catch (e) {
+      setState(() => salvando = false);
+      _toast('Erro ao salvar: $e', Colors.red);
     }
+  }
+
+  // 👇 3. TOAST AJUSTADO: Rápido e no Topo da tela!
+  void _toast(String msg, Color cor) {
+    if (!mounted) return;
+
+    // Limpa a fila para as mensagens não encavalarem
+    ScaffoldMessenger.of(context).clearSnackBars();
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg, style: const TextStyle(fontWeight: FontWeight.w500)),
+        backgroundColor: cor,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        dismissDirection:
+            DismissDirection.up, // Permite arrastar pra cima para fechar
+        margin: EdgeInsets.only(
+          bottom:
+              MediaQuery.of(context).size.height -
+              150, // 👈 Empurra lá para o TOPO
+          left: 16,
+          right: 16,
+        ),
+        duration: const Duration(
+          milliseconds: 1500,
+        ), // 👈 Duração curta (1.5 segundos)
+      ),
+    );
+  }
+
+  void _abrirMenuSecundario() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 36,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: const Color(0xFFCFD8DC),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const Text(
+              'Opções adicionais',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF37474F),
+              ),
+            ),
+            const SizedBox(height: 16),
+            _ItemMenu(
+              icon: Icons.document_scanner_rounded,
+              cor: _laranja,
+              titulo: 'Ler com IA',
+              subtitulo: 'Tira foto e tenta ler o medidor automaticamente',
+              carregando: processandoIA,
+              onTap: () {
+                Navigator.pop(context);
+                _lerComIA();
+              },
+            ),
+            const SizedBox(height: 8),
+            _ItemMenu(
+              icon: Icons.photo_library_rounded,
+              cor: _azul,
+              titulo: 'Escolher da galeria',
+              subtitulo: 'Seleciona uma foto já tirada',
+              onTap: () {
+                Navigator.pop(context);
+                _abrirGaleria();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
 
-    // 👇 A mágica acontece aqui: A leitura só é inválida se for menor E a chave mestra não estiver marcada.
-    bool leituraInvalida =
-        (leituraAnterior != null &&
+    final leituraInvalida =
+        leituraAnterior != null &&
         consumoCalculado != null &&
         consumoCalculado! < 0 &&
-        !houveTrocaOuCorrecao);
+        !houveTrocaOuCorrecao;
 
-    bool podeSalvar =
-        leituraAtualController.text.isNotEmpty && !leituraInvalida;
-    const Color mcDeepBlue = Color(0xFF0D47A1);
-    const Color mcOrange = Color(0xFFE65100);
+    final podeSalvar = _leituraCtrl.text.isNotEmpty && !leituraInvalida;
+    final medidorAtual = widget.medidorSelecionado ?? '';
+    final unidade = _unidadeMedidor(medidorAtual);
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Center(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: widget.medidores.map((m) {
-                  bool isSelected = widget.medidorSelecionado == m;
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 5),
-                    child: ChoiceChip(
-                      label: Text(
-                        _nomeMedidorBonito(m.toString()),
-                        style: TextStyle(
-                          color: isSelected ? Colors.white : Colors.blueGrey,
-                          fontWeight: FontWeight.bold,
+    return Column(
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 40),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Column(
+                    children: [
+                      Text(
+                        widget.apartamento,
+                        style: const TextStyle(
+                          fontSize: 52,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF1A1A2E),
+                          letterSpacing: -1,
+                          height: 1,
                         ),
                       ),
-                      selected: isSelected,
-                      selectedColor: mcDeepBlue,
-                      backgroundColor: Colors.white,
-                      onSelected: (selected) {
-                        if (selected) widget.onMedidorAlterado(m.toString());
-                      },
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-          ),
-          const SizedBox(height: 15),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.black87),
-                onPressed: () => Navigator.pop(context),
-              ),
-              Text(
-                widget.apartamento,
-                style: const TextStyle(
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.arrow_forward, color: Colors.black87),
-                onPressed: widget.onSalvo,
-              ),
-            ],
-          ),
-          const SizedBox(height: 15),
-          InputDecorator(
-            decoration: InputDecoration(
-              labelText: 'Leitura Anterior',
-              labelStyle: const TextStyle(
-                fontWeight: FontWeight.bold,
-                color: mcDeepBlue,
-                fontSize: 18,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 15,
-                vertical: 20,
-              ),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
                       const Text(
-                        'Referência',
-                        style: TextStyle(color: Colors.grey, fontSize: 14),
-                      ),
-                      const SizedBox(height: 5),
-                      Text(
-                        referenciaAnterior,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w500,
+                        'Apartamento',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF90A4AE),
+                          letterSpacing: 0.5,
                         ),
                       ),
                     ],
                   ),
                 ),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                const SizedBox(height: 20),
+
+                if (widget.medidores.length > 1)
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: widget.medidores.map<Widget>((m) {
+                        final sel = widget.medidorSelecionado == m;
+                        return GestureDetector(
+                          onTap: () => widget.onMedidorAlterado(m.toString()),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 180),
+                            margin: const EdgeInsets.only(right: 8),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: sel ? _azul : Colors.white,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: sel ? _azul : const Color(0xFFCFD8DC),
+                                width: 0.8,
+                              ),
+                              boxShadow: sel
+                                  ? [
+                                      BoxShadow(
+                                        color: _azul.withOpacity(0.2),
+                                        blurRadius: 6,
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ]
+                                  : [],
+                            ),
+                            child: Text(
+                              _nomeMedidor(m.toString()),
+                              style: TextStyle(
+                                color: sel
+                                    ? Colors.white
+                                    : const Color(0xFF607D8B),
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                const SizedBox(height: 16),
+
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: const Color(0xFFECEFF1),
+                      width: 0.8,
+                    ),
+                  ),
+                  child: Row(
                     children: [
-                      const Text(
-                        'Leitura',
-                        style: TextStyle(color: Colors.grey, fontSize: 14),
+                      const Icon(
+                        Icons.history_rounded,
+                        color: Color(0xFFB0BEC5),
+                        size: 18,
                       ),
-                      const SizedBox(height: 5),
+                      const SizedBox(width: 10),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Leitura anterior',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF90A4AE),
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            referenciaAnterior,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF607D8B),
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const Spacer(),
                       carregandoLeitura
                           ? const SizedBox(
-                              width: 15,
-                              height: 15,
-                              child: CircularProgressIndicator(strokeWidth: 2),
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Color(0xFF90A4AE),
+                              ),
                             )
                           : Text(
                               leituraAnterior == null
                                   ? 'Offline'
-                                  : leituraAnterior!
-                                        .toStringAsFixed(3)
-                                        .replaceAll('.', ','),
+                                  : '${leituraAnterior!.toStringAsFixed(3).replaceAll('.', ',')} $unidade',
                               style: const TextStyle(
                                 fontSize: 18,
-                                fontWeight: FontWeight.w500,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF546E7A),
+                                fontFeatures: [FontFeature.tabularFigures()],
                               ),
                             ),
                     ],
                   ),
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 15),
-          InputDecorator(
-            decoration: InputDecoration(
-              labelText: 'Leitura Atual',
-              labelStyle: const TextStyle(
-                fontWeight: FontWeight.bold,
-                color: mcDeepBlue,
-                fontSize: 18,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 15,
-                vertical: 20,
-              ),
-            ),
-            child: Column(
-              children: [
-                TextField(
-                  controller: leituraAtualController,
-                  keyboardType: TextInputType.number,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  decoration: InputDecoration(
-                    labelText: 'Digite a Leitura',
-                    labelStyle: const TextStyle(fontSize: 16),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
+                const SizedBox(height: 10),
+
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: leituraInvalida
+                          ? Colors.red.shade300
+                          : _leituraCtrl.text.isNotEmpty
+                          ? _azul.withOpacity(0.4)
+                          : const Color(0xFFECEFF1),
+                      width: leituraInvalida || _leituraCtrl.text.isNotEmpty
+                          ? 1.2
+                          : 0.8,
                     ),
-                    filled: true,
-                    fillColor: Colors.blue.shade50,
-                    prefixIcon: const Icon(Icons.speed, color: mcDeepBlue),
+                    boxShadow: _leituraCtrl.text.isNotEmpty && !leituraInvalida
+                        ? [
+                            BoxShadow(
+                              color: _azul.withOpacity(0.08),
+                              blurRadius: 10,
+                              offset: const Offset(0, 3),
+                            ),
+                          ]
+                        : [],
                   ),
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                    LeituraDecimalFormatter(),
-                  ],
-                  onChanged: _calcularConsumo,
-                ),
-                const SizedBox(height: 15),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          const Text(
-                            'Consumo Apurado',
-                            style: TextStyle(color: Colors.grey, fontSize: 14),
+                  child: Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.speed_rounded,
+                              color: _azul,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Leitura atual',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: _azul,
+                              ),
+                            ),
+                            const Spacer(),
+                            GestureDetector(
+                              onTap: _abrirMenuSecundario,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 5,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF5F6FA),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: const [
+                                    Icon(
+                                      Icons.more_horiz_rounded,
+                                      color: Color(0xFF90A4AE),
+                                      size: 18,
+                                    ),
+                                    SizedBox(width: 4),
+                                    Text(
+                                      'Mais',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Color(0xFF90A4AE),
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      TextField(
+                        controller: _leituraCtrl,
+                        focusNode:
+                            _focusNode, // 👈 VINCULANDO O FOCO AO CAMPO AQUI
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 44,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF1A1A2E),
+                          letterSpacing: 1,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                        decoration: InputDecoration(
+                          hintText: '0000,000',
+                          hintStyle: TextStyle(
+                            fontSize: 44,
+                            fontWeight: FontWeight.w700,
+                            color: const Color(0xFFCFD8DC),
+                            letterSpacing: 1,
                           ),
-                          const SizedBox(height: 5),
-                          Text(
+                          border: InputBorder.none,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                          suffixText: unidade,
+                          suffixStyle: const TextStyle(
+                            fontSize: 16,
+                            color: Color(0xFF90A4AE),
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                          LeituraDecimalFormatter(),
+                        ],
+                        onChanged: _calcularConsumo,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
+                  decoration: BoxDecoration(
+                    color: consumoCalculado == null
+                        ? const Color(0xFFF5F6FA)
+                        : leituraInvalida
+                        ? Colors.red.shade50
+                        : Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: consumoCalculado == null
+                          ? const Color(0xFFECEFF1)
+                          : leituraInvalida
+                          ? Colors.red.shade200
+                          : Colors.green.shade200,
+                      width: 0.8,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
                             consumoCalculado == null
-                                ? '0,000'
-                                : consumoCalculado!
-                                      .toStringAsFixed(3)
-                                      .replaceAll('.', ','),
+                                ? Icons.calculate_outlined
+                                : leituraInvalida
+                                ? Icons.trending_down_rounded
+                                : Icons.trending_up_rounded,
+                            color: consumoCalculado == null
+                                ? const Color(0xFFB0BEC5)
+                                : leituraInvalida
+                                ? Colors.red.shade600
+                                : Colors.green.shade600,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Consumo apurado',
                             style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                              color:
-                                  (consumoCalculado != null &&
-                                      consumoCalculado! < 0)
-                                  ? Colors.red
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              color: consumoCalculado == null
+                                  ? const Color(0xFFB0BEC5)
+                                  : leituraInvalida
+                                  ? Colors.red.shade700
                                   : Colors.green.shade700,
                             ),
                           ),
                         ],
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 15),
-                Container(
-                  padding: const EdgeInsets.symmetric(vertical: 15),
-                  decoration: BoxDecoration(
-                    color: Colors.blueGrey.shade50,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: fotoComprovante != null
-                      ? Column(
-                          children: [
-                            const Icon(
-                              Icons.check_circle,
-                              color: Colors.green,
-                              size: 40,
-                            ),
-                            const SizedBox(height: 5),
-                            Text(
-                              'Foto Anexada (Apto ${widget.apartamento})',
-                              style: const TextStyle(
-                                color: Colors.green,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            TextButton(
-                              onPressed: () =>
-                                  setState(() => fotoComprovante = null),
-                              child: const Text(
-                                'Remover Foto',
-                                style: TextStyle(color: Colors.red),
-                              ),
-                            ),
-                          ],
-                        )
-                      : Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                          children: [
-                            InkWell(
-                              onTap: processandoIA ? null : _tirarFotoELerComIA,
-                              child: Column(
-                                children: [
-                                  processandoIA
-                                      ? const SizedBox(
-                                          width: 30,
-                                          height: 30,
-                                          child: CircularProgressIndicator(
-                                            color: mcOrange,
-                                          ),
-                                        )
-                                      : const Icon(
-                                          Icons.document_scanner,
-                                          color: mcOrange,
-                                          size: 30,
-                                        ),
-                                  const SizedBox(height: 5),
-                                  Text(
-                                    processandoIA ? 'A ler...' : 'Ler com IA',
-                                    style: const TextStyle(
-                                      color: mcOrange,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            InkWell(
-                              onTap: _tirarFoto,
-                              child: const Column(
-                                children: [
-                                  Icon(
-                                    Icons.camera_alt,
-                                    color: mcDeepBlue,
-                                    size: 30,
-                                  ),
-                                  SizedBox(height: 5),
-                                  Text(
-                                    'Câmera (Manual)',
-                                    style: TextStyle(color: mcDeepBlue),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            InkWell(
-                              onTap: _abrirGaleria,
-                              child: const Column(
-                                children: [
-                                  Icon(
-                                    Icons.photo_library,
-                                    color: mcDeepBlue,
-                                    size: 30,
-                                  ),
-                                  SizedBox(height: 5),
-                                  Text(
-                                    'Galeria',
-                                    style: TextStyle(color: mcDeepBlue),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                ),
-              ],
-            ),
-          ),
-
-          if (leituraInvalida)
-            const Padding(
-              padding: EdgeInsets.only(top: 10),
-              child: Center(
-                child: Text(
-                  '❌ Leitura inválida (Menor que a anterior)!',
-                  style: TextStyle(
-                    color: Colors.red,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ),
-
-          // 👇 CHAVE MESTRA: CAIXA DE SELEÇÃO DE CORREÇÃO
-          Container(
-            margin: const EdgeInsets.symmetric(vertical: 10),
-            decoration: BoxDecoration(
-              color: houveTrocaOuCorrecao
-                  ? Colors.red.shade50
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: houveTrocaOuCorrecao ? Colors.red : Colors.grey.shade300,
-              ),
-            ),
-            child: CheckboxListTile(
-              title: const Text(
-                'Troca de Medidor / Correção de Erro',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-              ),
-              subtitle: const Text(
-                'Permite guardar leituras menores que a anterior (Reset do relógio).',
-              ),
-              value: houveTrocaOuCorrecao,
-              activeColor: Colors.red.shade700,
-              onChanged: (bool? valor) {
-                setState(() {
-                  houveTrocaOuCorrecao = valor ?? false;
-                });
-              },
-            ),
-          ),
-
-          const SizedBox(height: 15),
-          if (podeSalvar)
-            salvando
-                ? const Center(child: CircularProgressIndicator())
-                : Row(
-                    children: [
-                      Expanded(
-                        flex: 1,
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: mcOrange,
-                            padding: const EdgeInsets.symmetric(vertical: 15),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                          onPressed: _tirarFotoELerComIA,
-                          child: const Icon(
-                            Icons.document_scanner,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        flex: 3,
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: mcDeepBlue,
-                            padding: const EdgeInsets.symmetric(vertical: 15),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                          onPressed: _salvarDadosNaCaixaDeSaida,
-                          child: Text(
-                            modoEdicao
-                                ? 'GUARDAR CORREÇÃO'
-                                : 'GUARDAR E AVANÇAR',
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
-                          ),
+                      Text(
+                        consumoCalculado == null
+                            ? '-- $unidade'
+                            : '${consumoCalculado! >= 0 ? '+' : ''}${consumoCalculado!.toStringAsFixed(3).replaceAll('.', ',')} $unidade',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                          color: consumoCalculado == null
+                              ? const Color(0xFFCFD8DC)
+                              : leituraInvalida
+                              ? Colors.red.shade700
+                              : Colors.green.shade700,
+                          fontFeatures: const [FontFeature.tabularFigures()],
                         ),
                       ),
                     ],
                   ),
-          const SizedBox(height: 40),
-          const Center(
-            child: Text(
-              'MC PRESTADORA DE SERVIÇOS CONDOMINIAIS LTDA',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 12,
-                color: Colors.black87,
-              ),
+                ),
+                const SizedBox(height: 10),
+
+                GestureDetector(
+                  onTap: fotoComprovante == null ? _tirarFotoManual : null,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: fotoComprovante != null
+                            ? Colors.green.shade300
+                            : const Color(0xFFECEFF1),
+                        width: 0.8,
+                      ),
+                    ),
+                    child: fotoComprovante != null
+                        ? Row(
+                            children: [
+                              const Icon(
+                                Icons.check_circle_rounded,
+                                color: Colors.green,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 10),
+                              const Expanded(
+                                child: Text(
+                                  'Foto anexada',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                    color: Colors.green,
+                                  ),
+                                ),
+                              ),
+                              GestureDetector(
+                                onTap: () =>
+                                    setState(() => fotoComprovante = null),
+                                child: const Icon(
+                                  Icons.close_rounded,
+                                  color: Color(0xFFB0BEC5),
+                                  size: 18,
+                                ),
+                              ),
+                            ],
+                          )
+                        : Row(
+                            children: const [
+                              Icon(
+                                Icons.camera_alt_rounded,
+                                color: Color(0xFF90A4AE),
+                                size: 20,
+                              ),
+                              SizedBox(width: 10),
+                              Text(
+                                'Tirar foto (opcional)',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Color(0xFF90A4AE),
+                                ),
+                              ),
+                              Spacer(),
+                              Icon(
+                                Icons.chevron_right_rounded,
+                                color: Color(0xFFCFD8DC),
+                                size: 18,
+                              ),
+                            ],
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  decoration: BoxDecoration(
+                    color: houveTrocaOuCorrecao
+                        ? Colors.red.shade50
+                        : Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: houveTrocaOuCorrecao
+                          ? Colors.red.shade200
+                          : const Color(0xFFECEFF1),
+                      width: 0.8,
+                    ),
+                  ),
+                  child: CheckboxListTile(
+                    dense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 2,
+                    ),
+                    title: const Text(
+                      'Troca de medidor / Correção',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: Color(0xFF37474F),
+                      ),
+                    ),
+                    subtitle: const Text(
+                      'Permite leitura menor que a anterior',
+                      style: TextStyle(fontSize: 12, color: Color(0xFF90A4AE)),
+                    ),
+                    value: houveTrocaOuCorrecao,
+                    activeColor: Colors.red.shade700,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    onChanged: (v) =>
+                        setState(() => houveTrocaOuCorrecao = v ?? false),
+                  ),
+                ),
+
+                if (leituraInvalida)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: Colors.red.shade200,
+                          width: 0.8,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.error_outline_rounded,
+                            color: Colors.red.shade700,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Leitura menor que a anterior',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.red.shade700,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                const SizedBox(height: 24),
+                const Center(
+                  child: Text(
+                    'MC PRESTADORA DE SERVIÇOS CONDOMINIAIS LTDA',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: Color(0xFFB0BEC5),
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 20),
-        ],
+        ),
+
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 10,
+                offset: const Offset(0, -4),
+              ),
+            ],
+          ),
+          child: SafeArea(
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 55,
+                  height: 50,
+                  child: OutlinedButton(
+                    onPressed: widget.isPrimeiro ? null : widget.onAnterior,
+                    style: OutlinedButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      side: BorderSide(
+                        color: widget.isPrimeiro ? Colors.grey.shade300 : _azul,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: Icon(
+                      Icons.chevron_left_rounded,
+                      size: 30,
+                      color: widget.isPrimeiro ? Colors.grey.shade400 : _azul,
+                    ),
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                Expanded(
+                  child: SizedBox(
+                    height: 54,
+                    child: ElevatedButton.icon(
+                      onPressed: podeSalvar
+                          ? (salvando ? null : _verificarEGuardar)
+                          : null,
+                      icon: salvando
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : const Icon(
+                              Icons.check_rounded,
+                              color: Colors.white,
+                            ),
+                      label: Text(
+                        salvando
+                            ? 'A GUARDAR...'
+                            : (modoEdicao
+                                  ? 'CONFIRMAR CORREÇÃO'
+                                  : 'GUARDAR E AVANÇAR'),
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _azul,
+                        disabledBackgroundColor: Colors.grey.shade300,
+                        elevation: podeSalvar ? 2 : 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                SizedBox(
+                  width: 55,
+                  height: 50,
+                  child: OutlinedButton(
+                    onPressed: widget.isUltimo ? null : widget.onProximo,
+                    style: OutlinedButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      side: BorderSide(
+                        color: widget.isUltimo ? Colors.grey.shade300 : _azul,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: Icon(
+                      Icons.chevron_right_rounded,
+                      size: 30,
+                      color: widget.isUltimo ? Colors.grey.shade400 : _azul,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ItemMenu extends StatelessWidget {
+  final IconData icon;
+  final Color cor;
+  final String titulo;
+  final String subtitulo;
+  final VoidCallback onTap;
+  final bool carregando;
+
+  const _ItemMenu({
+    required this.icon,
+    required this.cor,
+    required this.titulo,
+    required this.subtitulo,
+    required this.onTap,
+    this.carregando = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: carregando ? null : onTap,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF5F6FA),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: cor.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: carregando
+                  ? SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: cor,
+                      ),
+                    )
+                  : Icon(icon, color: cor, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    titulo,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF37474F),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitulo,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF90A4AE),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: Color(0xFFCFD8DC),
+              size: 18,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2128,7 +2777,7 @@ class TelaSincronizacao extends StatefulWidget {
 }
 
 class _TelaSincronizacaoState extends State<TelaSincronizacao> {
-  List<String> filaDeLeituras = [];
+  List<Map<String, dynamic>> filaDeLeituras = [];
   bool sincronizando = false;
   int totalParaSincronizar = 0;
 
@@ -2139,9 +2788,9 @@ class _TelaSincronizacaoState extends State<TelaSincronizacao> {
   }
 
   Future<void> _carregarFila() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
+    final fila = await BancoLocal.lerFila();
     setState(() {
-      filaDeLeituras = prefs.getStringList('fila_leituras') ?? [];
+      filaDeLeituras = fila;
       totalParaSincronizar = filaDeLeituras.length;
     });
   }
@@ -2151,10 +2800,12 @@ class _TelaSincronizacaoState extends State<TelaSincronizacao> {
     setState(() {
       sincronizando = true;
     });
-    List<String> filaAtualizada = List.from(filaDeLeituras);
 
-    for (String itemJson in filaDeLeituras) {
+    int sucessoCount = 0;
+    for (var linha in filaDeLeituras) {
       try {
+        int idLocal = linha['id'];
+        String itemJson = linha['dados'];
         Map<String, dynamic> dados = jsonDecode(itemJson);
         String? urlFotoFirebase;
         String? caminhoLocal = dados['caminho_foto_local'];
@@ -2213,20 +2864,20 @@ class _TelaSincronizacaoState extends State<TelaSincronizacao> {
             .collection('leituras')
             .doc(idUnicoDoc)
             .set(pacoteParaNuvem, SetOptions(merge: true));
-        filaAtualizada.remove(itemJson);
+
+        await BancoLocal.remover(idLocal, itemJson);
+        sucessoCount++;
       } catch (e) {
         debugPrint("Falha ao sincronizar item: $e");
       }
     }
 
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList('fila_leituras', filaAtualizada);
-    _carregarFila();
+    await _carregarFila();
     setState(() {
       sincronizando = false;
     });
     if (mounted) {
-      if (filaAtualizada.isEmpty) {
+      if (filaDeLeituras.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Tudo enviado para a nuvem com sucesso!'),
@@ -2321,298 +2972,1120 @@ class TelaAdminDashboard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    const Color azul = Color(0xFF0D47A1);
+    const Color fundo = Color(0xFFF5F6FA);
+
     return Scaffold(
+      backgroundColor: fundo,
       appBar: AppBar(
         title: const Text(
-          'Painel de Controlo - Administradora',
-          style: TextStyle(color: Colors.white),
+          'Centro de Comando',
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+            fontSize: 18,
+          ),
         ),
-        backgroundColor: Colors.blueGrey.shade900,
+        backgroundColor: azul,
+        elevation: 0,
         actions: [
           IconButton(
-            icon: const Icon(Icons.logout, color: Colors.white),
-            tooltip: 'Sair do Sistema',
+            icon: const Icon(Icons.logout_rounded, color: Colors.white),
+            tooltip: 'Sair',
             onPressed: () async {
               await FirebaseAuth.instance.signOut();
-              if (context.mounted)
+              if (context.mounted) {
                 Navigator.pushReplacement(
                   context,
                   MaterialPageRoute(builder: (context) => const EcraLogin()),
                 );
+              }
             },
           ),
         ],
       ),
-      body: Center(
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.domain, size: 100, color: Colors.blueGrey),
-              const SizedBox(height: 20),
-              const Text(
-                'Bem-vindo ao Centro de Comando',
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 50),
-              Wrap(
-                spacing: 30,
-                runSpacing: 30,
-                alignment: WrapAlignment.center,
+      body: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            child: Stack(
+              children: [
+                Container(
+                  height: 140,
+                  width: double.infinity,
+                  decoration: const BoxDecoration(
+                    color: azul,
+                    borderRadius: BorderRadius.vertical(
+                      bottom: Radius.circular(30),
+                    ),
+                  ),
+                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: const [
+                      Text(
+                        'Olá, Administrador!',
+                        style: TextStyle(color: Colors.white70, fontSize: 16),
+                      ),
+                      SizedBox(height: 5),
+                      Text(
+                        'Visão Geral da Operação',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                Padding(
+                  padding: const EdgeInsets.only(
+                    top: 85,
+                    left: 16,
+                    right: 16,
+                    bottom: 20,
+                  ),
+                  child: Row(
+                    children: [
+                      // 👇 CARTÃO PRÉDIOS AGORA É CLICÁVEL
+                      Expanded(
+                        child: _kpiCard(
+                          'Prédios',
+                          Icons.apartment_rounded,
+                          Colors.blue.shade700,
+                          FirebaseFirestore.instance
+                              .collection('predios')
+                              .where(
+                                'id_administradora',
+                                isEqualTo: idAdministradora,
+                              )
+                              .snapshots(),
+                          () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => TelaGerenciarEquipes(
+                                idAdministradora: idAdministradora,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      // 👇 CARTÃO EQUIPE AGORA É CLICÁVEL E LEVA PARA A NOVA TELA
+                      Expanded(
+                        child: _kpiCard(
+                          'Equipe',
+                          Icons.people_alt_rounded,
+                          Colors.green.shade700,
+                          FirebaseFirestore.instance
+                              .collection('usuarios')
+                              .where(
+                                'id_administradora',
+                                isEqualTo: idAdministradora,
+                              )
+                              .where('cargo', isEqualTo: 'leiturista')
+                              .snapshots(),
+                          () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => TelaListaEquipe(
+                                idAdministradora: idAdministradora,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _botaoCard(
-                    context,
-                    'Registar Prédio',
-                    Icons.domain_add,
-                    Colors.blue.shade700,
-                    () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => TelaCadastroPredio(
-                          idAdministradora: idAdministradora,
-                        ),
-                      ),
+                  const Text(
+                    'Ações Rápidas',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF1A1A2E),
                     ),
                   ),
-                  _botaoCard(
-                    context,
-                    'Registar Leiturista',
-                    Icons.person_add,
-                    Colors.green.shade700,
-                    () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => TelaCadastroLeiturista(
-                          idAdministradora: idAdministradora,
+                  const SizedBox(height: 15),
+                  // 👇 Substituímos o GridView por uma Row idêntica à dos KPIs
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _actionCard(
+                          context,
+                          'Ver Relatórios',
+                          'Consumos e PDF',
+                          Icons.insert_chart_rounded,
+                          Colors.orange.shade600,
+                          () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => TelaRelatoriosBusca(
+                                idAdministradora: idAdministradora,
+                              ),
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-                  ),
-                  _botaoCard(
-                    context,
-                    'Ver Relatórios',
-                    Icons.insert_chart,
-                    Colors.orange.shade700,
-                    () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => TelaRelatoriosBusca(
-                          idAdministradora: idAdministradora,
+                      const SizedBox(width: 15),
+                      Expanded(
+                        child: _actionCard(
+                          context,
+                          'Gerir Roteiros',
+                          'Acompanhar Leituras',
+                          Icons.assignment_ind_rounded,
+                          Colors.purple.shade600,
+                          () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => TelaGerenciarEquipes(
+                                idAdministradora: idAdministradora,
+                              ),
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-                  ),
-                  _botaoCard(
-                    context,
-                    'Gerir Roteiros',
-                    Icons.assignment_ind,
-                    Colors.purple.shade700,
-                    () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => TelaGerenciarEquipes(
-                          idAdministradora: idAdministradora,
-                        ),
-                      ),
-                    ),
+                    ],
                   ),
                 ],
               ),
-            ],
+            ),
+          ),
+
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Cadastros do Sistema',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF1A1A2E),
+                    ),
+                  ),
+                  const SizedBox(height: 15),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(15),
+                      border: Border.all(color: Colors.grey.shade200),
+                    ),
+                    child: Column(
+                      children: [
+                        ListTile(
+                          leading: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Icon(
+                              Icons.domain_add_rounded,
+                              color: Colors.blue.shade700,
+                            ),
+                          ),
+                          title: const Text(
+                            'Registar Novo Prédio',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          subtitle: const Text(
+                            'Adicionar condomínio e medidores',
+                          ),
+                          trailing: const Icon(
+                            Icons.chevron_right_rounded,
+                            color: Colors.grey,
+                          ),
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => TelaCadastroPredio(
+                                idAdministradora: idAdministradora,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const Divider(height: 1),
+                        ListTile(
+                          leading: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.green.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Icon(
+                              Icons.person_add_rounded,
+                              color: Colors.green.shade700,
+                            ),
+                          ),
+                          title: const Text(
+                            'Registar Leiturista',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          subtitle: const Text(
+                            'Criar acesso para a equipe de campo',
+                          ),
+                          trailing: const Icon(
+                            Icons.chevron_right_rounded,
+                            color: Colors.grey,
+                          ),
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => TelaCadastroLeiturista(
+                                idAdministradora: idAdministradora,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 40),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 👇 O CARTÃO KPI AGORA RECEBE A AÇÃO ONTAP
+  Widget _kpiCard(
+    String titulo,
+    IconData icon,
+    Color cor,
+    Stream<QuerySnapshot> stream,
+    VoidCallback onTap,
+  ) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent, // Para o efeito de clique aparecer
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(icon, color: cor, size: 28),
+                const SizedBox(height: 12),
+                StreamBuilder<QuerySnapshot>(
+                  stream: stream,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Text(
+                        '...',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      );
+                    }
+                    int count = snapshot.data?.docs.length ?? 0;
+                    return Text(
+                      count.toString(),
+                      style: const TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1A1A2E),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      titulo,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const Icon(
+                      Icons.arrow_forward_ios_rounded,
+                      size: 10,
+                      color: Colors.grey,
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _botaoCard(
+  // 👇 Cartão ajustado: Removemos o Spacer e colocamos a mesma estrutura do KPI
+  Widget _actionCard(
     BuildContext context,
     String titulo,
-    IconData icone,
+    String subtitulo,
+    IconData icon,
     Color cor,
-    VoidCallback acao,
+    VoidCallback onTap,
   ) {
-    return InkWell(
-      onTap: acao,
-      borderRadius: BorderRadius.circular(15),
-      child: Container(
-        width: 200,
-        height: 150,
-        decoration: BoxDecoration(
-          color: cor.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(15),
-          border: Border.all(color: cor, width: 2),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icone, size: 50, color: cor),
-            const SizedBox(height: 15),
-            Text(
-              titulo,
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: cor,
-              ),
-              textAlign: TextAlign.center,
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [
+          BoxShadow(
+            color: cor.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: cor.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(icon, color: cor, size: 24),
+                ),
+                const SizedBox(
+                  height: 16,
+                ), // Substituímos o Spacer() por um espaço fixo
+                Text(
+                  titulo,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                    color: Color(0xFF1A1A2E),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitulo,
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
   }
 }
 
-class TelaSuperAdminDashboard extends StatelessWidget {
+class TelaSuperAdminDashboard extends StatefulWidget {
   const TelaSuperAdminDashboard({super.key});
 
   @override
+  State<TelaSuperAdminDashboard> createState() =>
+      _TelaSuperAdminDashboardState();
+}
+
+class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
+  // 🟢 FUNÇÃO MÁGICA: IMPORTAÇÃO DO EXCEL
+  // 🟢 NOVA ESTRATÉGIA: IMPORTAÇÃO POR COPIAR E COLAR (SMART PASTE)
+  void _abrirDialogImportacao(String idAdministradora) {
+    final TextEditingController _pasteController = TextEditingController();
+    bool processando = false;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            return AlertDialog(
+              title: Row(
+                children: const [
+                  Icon(Icons.paste_rounded, color: Color(0xFF0D47A1)),
+                  SizedBox(width: 10),
+                  Text(
+                    'Importação Rápida (Smart Paste)',
+                    style: TextStyle(fontSize: 18),
+                  ),
+                ],
+              ),
+              content: SizedBox(
+                width: 500,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Copie os dados diretamente do seu Excel e cole na caixa abaixo.\n'
+                      'Ordem das colunas: Condomínio | Apto | Medidor',
+                      style: TextStyle(fontSize: 13, color: Colors.grey),
+                    ),
+                    const SizedBox(height: 15),
+                    TextField(
+                      controller: _pasteController,
+                      maxLines: 8,
+                      decoration: InputDecoration(
+                        hintText:
+                            "Exemplo:\nEdifício Sol\t101\tÁgua\nEdifício Sol\t102\tGás",
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        filled: true,
+                        fillColor: Colors.grey.shade50,
+                      ),
+                    ),
+                    if (processando)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 15),
+                        child: Center(child: CircularProgressIndicator()),
+                      ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: processando ? null : () => Navigator.pop(context),
+                  child: const Text(
+                    'CANCELAR',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: processando
+                      ? null
+                      : () async {
+                          if (_pasteController.text.trim().isEmpty) return;
+                          setStateDialog(() => processando = true);
+
+                          await _processarTextoColado(
+                            _pasteController.text,
+                            idAdministradora,
+                          );
+
+                          if (context.mounted) Navigator.pop(context);
+                        },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF0D47A1),
+                  ),
+                  child: const Text(
+                    'IMPORTAR DADOS',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // O Motor que lê o texto colado e injeta no Firebase
+  Future<void> _processarTextoColado(
+    String textoBruto,
+    String idAdministradora,
+  ) async {
+    try {
+      // O Excel separa as linhas por "Enter" (\n) e as colunas por "Tab" (\t)
+      List<String> linhas = textoBruto.trim().split('\n');
+
+      WriteBatch batch = FirebaseFirestore.instance.batch();
+      int contador = 0;
+      int totalImportados = 0;
+
+      for (String linha in linhas) {
+        if (linha.trim().isEmpty) continue;
+
+        List<String> colunas = linha.split('\t');
+
+        // Exige pelo menos Condominio e Apartamento (Medidor é bônus)
+        if (colunas.length < 2) continue;
+
+        String condominio = colunas[0].trim();
+        String apartamento = colunas[1].trim();
+        String medidor = colunas.length > 2 && colunas[2].trim().isNotEmpty
+            ? colunas[2].trim()
+            : 'Água';
+
+        // Evita cabeçalhos colados por acidente
+        if (condominio.toLowerCase() == 'condominio' ||
+            apartamento.toLowerCase() == 'apartamento')
+          continue;
+
+        var docRef = FirebaseFirestore.instance.collection('leituras').doc();
+        batch.set(docRef, {
+          'id_administradora': idAdministradora,
+          'condominio': condominio,
+          'apartamento': apartamento,
+          'medidor': medidor,
+          'leitura_anterior': 0.0,
+          'leitura_atual': 0.0,
+          'consumo': 0.0,
+          'teve_consumo': false,
+          'tem_foto_anexada': false,
+          'correcao_manual': true,
+          'data_hora': FieldValue.serverTimestamp(),
+          'importacao_lote': true,
+        });
+
+        contador++;
+        totalImportados++;
+
+        // Limite do Firebase Batch é 500
+        if (contador >= 450) {
+          await batch.commit();
+          batch = FirebaseFirestore.instance.batch();
+          contador = 0;
+        }
+      }
+
+      if (contador > 0) {
+        await batch.commit();
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '✅ $totalImportados medidores importados com sucesso!',
+            ),
+            backgroundColor: Colors.green.shade700,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao processar dados: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  void _mostrarErro(String msg) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
+  }
+
+  @override
   Widget build(BuildContext context) {
+    const Color azulEscuro = Color(0xFF0A192F);
+    const Color azul = Color(0xFF0D47A1);
+    const Color fundo = Color(0xFFF5F6FA);
+
     return Scaffold(
+      backgroundColor: fundo,
       appBar: AppBar(
         title: const Text(
-          'MC Prestadora - Painel Master SaaS',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          'Painel Master SaaS',
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+            fontSize: 18,
+          ),
         ),
-        backgroundColor: Colors.black87,
+        backgroundColor: azulEscuro,
+        elevation: 0,
         actions: [
           IconButton(
-            icon: const Icon(Icons.logout, color: Colors.white),
+            icon: const Icon(Icons.logout_rounded, color: Colors.white),
             tooltip: 'Sair do Sistema',
             onPressed: () async {
               await FirebaseAuth.instance.signOut();
-              if (context.mounted)
+              if (context.mounted) {
                 Navigator.pushReplacement(
                   context,
+                  // Nota: Assegure-se que EcraLogin está importado no topo do seu ficheiro original
                   MaterialPageRoute(builder: (context) => const EcraLogin()),
                 );
+              }
             },
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: Colors.amber.shade700,
-        icon: const Icon(Icons.domain_add, color: Colors.white),
-        label: const Text(
-          'Novo Cliente (Administradora)',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => const TelaCadastroAdministradora(),
-            ),
-          );
-        },
-      ),
-      body: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(30),
-            width: double.infinity,
-            color: Colors.grey.shade200,
-            child: const Column(
+      body: CustomScrollView(
+        slivers: [
+          // --- CABEÇALHO E KPIs (SOBREPOSTOS COM STACK) ---
+          SliverToBoxAdapter(
+            child: Stack(
               children: [
-                Icon(
-                  Icons.admin_panel_settings,
-                  size: 80,
-                  color: Colors.black87,
+                // 1. Fundo Premium (Fica por trás)
+                Container(
+                  height: 140,
+                  width: double.infinity,
+                  decoration: const BoxDecoration(
+                    color: azulEscuro,
+                    borderRadius: BorderRadius.vertical(
+                      bottom: Radius.circular(30),
+                    ),
+                  ),
+                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: const [
+                      Text(
+                        'Olá, MC Prestadora!',
+                        style: TextStyle(color: Colors.white70, fontSize: 16),
+                      ),
+                      SizedBox(height: 5),
+                      Text(
+                        'Gestão de Clientes',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                SizedBox(height: 10),
-                Text(
-                  'Gestão de Clientes',
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-                ),
-                Text(
-                  'Administre as empresas que utilizam o seu sistema.',
-                  style: TextStyle(color: Colors.grey, fontSize: 16),
+
+                // 2. Cartões Flutuantes (KPIs)
+                Padding(
+                  padding: const EdgeInsets.only(
+                    top: 85,
+                    left: 16,
+                    right: 16,
+                    bottom: 20,
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: _kpiCard(
+                          'Empresas',
+                          Icons.domain_rounded,
+                          azul,
+                          FirebaseFirestore.instance
+                              .collection('administradoras')
+                              .snapshots(),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _kpiCard(
+                          'Gestores',
+                          Icons.admin_panel_settings_rounded,
+                          Colors.amber.shade700,
+                          FirebaseFirestore.instance
+                              .collection('usuarios')
+                              .where('cargo', isEqualTo: 'admin')
+                              .snapshots(),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
           ),
-          Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('administradoras')
-                  .orderBy('data_cadastro', descending: true)
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting)
-                  return const Center(child: CircularProgressIndicator());
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty)
-                  return const Center(
-                    child: Text(
-                      'Nenhum cliente cadastrado ainda. Comece a vender!',
-                      style: TextStyle(fontSize: 18, color: Colors.grey),
-                    ),
-                  );
 
-                return ListView.builder(
-                  padding: const EdgeInsets.all(20),
-                  itemCount: snapshot.data!.docs.length,
-                  itemBuilder: (context, index) {
-                    var doc = snapshot.data!.docs[index];
-                    var adminData = doc.data() as Map<String, dynamic>;
-                    return Card(
-                      elevation: 4,
-                      margin: const EdgeInsets.only(bottom: 20),
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.all(20),
-                        leading: CircleAvatar(
-                          backgroundColor: Colors.black87,
-                          radius: 30,
-                          child: Text(
-                            adminData['nome_empresa'].toUpperCase(),
-                            style: const TextStyle(
+          // --- AÇÕES RÁPIDAS ---
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Expansão do Sistema',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF1A1A2E),
+                    ),
+                  ),
+                  const SizedBox(height: 15),
+                  InkWell(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          // Nota: Assegure-se que TelaCadastroAdministradora está importada
+                          builder: (context) =>
+                              const TelaCadastroAdministradora(),
+                        ),
+                      );
+                    },
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [azul, Colors.blue.shade700],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                            color: azul.withOpacity(0.3),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(
+                              Icons.domain_add_rounded,
                               color: Colors.white,
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
+                              size: 28,
                             ),
                           ),
-                        ),
-                        title: Text(
-                          adminData['nome_empresa'],
-                          style: const TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
+                          const SizedBox(width: 15),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: const [
+                                Text(
+                                  'Novo Cliente',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 18,
+                                  ),
+                                ),
+                                Text(
+                                  'Cadastrar uma nova administradora',
+                                  style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                        subtitle: Text(
-                          'CNPJ: ${adminData['cnpj'] ?? 'Não informado'}',
-                          style: const TextStyle(fontSize: 16),
-                        ),
-                        trailing: ElevatedButton.icon(
-                          icon: const Icon(
-                            Icons.person_add,
+                          const Icon(
+                            Icons.chevron_right_rounded,
                             color: Colors.white,
                           ),
-                          label: const Text(
-                            'Criar Acesso Admin',
-                            style: TextStyle(color: Colors.white),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // --- LISTA DE CLIENTES ---
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 25, 20, 15),
+              child: const Text(
+                'Clientes Ativos',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF1A1A2E),
+                ),
+              ),
+            ),
+          ),
+
+          StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('administradoras')
+                .orderBy('data_cadastro', descending: true)
+                .snapshots(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const SliverFillRemaining(
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
+              if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                return SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.all(40),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.business_center_rounded,
+                          size: 60,
+                          color: Colors.grey.shade300,
+                        ),
+                        const SizedBox(height: 15),
+                        const Text(
+                          'Nenhum cliente cadastrado.',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: Colors.grey,
+                            fontWeight: FontWeight.w500,
                           ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blue.shade800,
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+
+              return SliverPadding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 0,
+                ),
+                sliver: SliverList(
+                  delegate: SliverChildBuilderDelegate((context, index) {
+                    var doc = snapshot.data!.docs[index];
+                    var adminData = doc.data() as Map<String, dynamic>;
+
+                    String nome = adminData['nome_empresa'] ?? 'Empresa';
+                    String inicial = nome.isNotEmpty
+                        ? nome[0].toUpperCase()
+                        : 'E';
+
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 15),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.grey.shade200),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.02),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
                           ),
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => TelaCriarAcessoCliente(
-                                  idAdministradora: doc.id,
-                                  nomeEmpresa: adminData['nome_empresa'],
+                        ],
+                      ),
+                      child: Column(
+                        children: [
+                          ListTile(
+                            contentPadding: const EdgeInsets.fromLTRB(
+                              16,
+                              16,
+                              16,
+                              0,
+                            ),
+                            leading: Container(
+                              width: 50,
+                              height: 50,
+                              decoration: BoxDecoration(
+                                color: azulEscuro.withOpacity(0.05),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  inicial,
+                                  style: const TextStyle(
+                                    color: azulEscuro,
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
                               ),
-                            );
-                          },
-                        ),
+                            ),
+                            title: Text(
+                              nome,
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF1A1A2E),
+                              ),
+                            ),
+                            subtitle: Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Text(
+                                'CNPJ: ${adminData['cnpj'] ?? 'Não informado'}',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.grey.shade600,
+                                ),
+                              ),
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Row(
+                              children: [
+                                // BOTÃO DE CRIAR ACESSO ADMIN
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    icon: const Icon(
+                                      Icons.admin_panel_settings_rounded,
+                                      size: 18,
+                                    ),
+                                    label: const Text(
+                                      'Criar Acesso',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: azul,
+                                      side: BorderSide(
+                                        color: azul.withOpacity(0.5),
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 12,
+                                      ),
+                                    ),
+                                    onPressed: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) =>
+                                              TelaCriarAcessoCliente(
+                                                idAdministradora: doc.id,
+                                                nomeEmpresa: nome,
+                                              ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+
+                                // BOTÃO ATUALIZADO PARA IMPORTAÇÃO EM MASSA
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    icon: const Icon(
+                                      Icons.paste_rounded,
+                                      size: 18,
+                                      color: Colors.white,
+                                    ), // Ícone mudou
+                                    label: const Text(
+                                      'Importar em Massa',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.green.shade700,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 12,
+                                      ),
+                                      elevation: 0,
+                                    ),
+                                    onPressed: () => _abrirDialogImportacao(
+                                      doc.id,
+                                    ), // 🔥 A NOVA FUNÇÃO AQUI!
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                     );
-                  },
+                  }, childCount: snapshot.data!.docs.length),
+                ),
+              );
+            },
+          ),
+          const SliverPadding(padding: EdgeInsets.only(bottom: 40)),
+        ],
+      ),
+    );
+  }
+
+  // Widget Interno: Cartão de Estatísticas do Super Admin
+  Widget _kpiCard(
+    String titulo,
+    IconData icon,
+    Color cor,
+    Stream<QuerySnapshot> stream,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: cor, size: 28),
+          const SizedBox(height: 12),
+          StreamBuilder<QuerySnapshot>(
+            stream: stream,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Text(
+                  '...',
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                 );
-              },
+              }
+              int count = snapshot.data?.docs.length ?? 0;
+              return Text(
+                count.toString(),
+                style: const TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF1A1A2E),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 4),
+          Text(
+            titulo,
+            style: const TextStyle(
+              fontSize: 13,
+              color: Colors.grey,
+              fontWeight: FontWeight.w500,
             ),
           ),
         ],
@@ -3004,6 +4477,8 @@ class _TelaRelatoriosBuscaState extends State<TelaRelatoriosBusca> {
                             MaterialPageRoute(
                               builder: (context) => TelaRelatoriosPredio(
                                 condominio: predio['nome_predio'],
+                                idAdministradora: widget
+                                    .idAdministradora, // 👈 ENVIANDO O ID DA EMPRESA
                               ),
                             ),
                           );
@@ -3021,12 +4496,15 @@ class _TelaRelatoriosBuscaState extends State<TelaRelatoriosBusca> {
   }
 }
 
-// =========================================================
-// --- TELA WEB E MOBILE: RELATÓRIO DO PRÉDIO (APENAS MÊS ATUAL e COM FILTROS) ---
-// =========================================================
 class TelaRelatoriosPredio extends StatefulWidget {
   final String condominio;
-  const TelaRelatoriosPredio({super.key, required this.condominio});
+  final String idAdministradora;
+
+  const TelaRelatoriosPredio({
+    super.key,
+    required this.condominio,
+    required this.idAdministradora,
+  });
 
   @override
   State<TelaRelatoriosPredio> createState() => _TelaRelatoriosPredioState();
@@ -3041,13 +4519,17 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
       var dados = doc.data() as Map<String, dynamic>;
       if (dados['medidor'] != null) {
         String m = dados['medidor'].toString().toLowerCase();
-        if (m.contains('água') || m.contains('agua'))
+        if (m.contains('água') || m.contains('agua')) {
           tiposEncontrados.add('Agua');
-        if (m.contains('gás') || m.contains('gas')) tiposEncontrados.add('Gas');
+        }
+        if (m.contains('gás') || m.contains('gas')) {
+          tiposEncontrados.add('Gas');
+        }
         if (m.contains('luz') ||
             m.contains('energia') ||
-            m.contains('eletricidade'))
+            m.contains('eletricidade')) {
           tiposEncontrados.add('Energia');
+        }
       }
     }
     if (tiposEncontrados.isEmpty) return 'Leitura_Geral';
@@ -3059,6 +4541,49 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
     BuildContext context,
     List<QueryDocumentSnapshot> leituras,
   ) async {
+    // 🛑 FEEDBACK VISUAL IMEDIATO: Informa o usuário no ato do clique
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Preparando arquivo Excel...'),
+          backgroundColor: Color(0xFF0D47A1),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+
+    String nomeEmpresa = 'MC PRESTADORA DE SERVIÇOS CONDOMINIAIS LTDA';
+    String cnpjEmpresa = 'Não informado';
+    String emailEmpresa = 'anderson.mcservicos@gmail.com';
+    String telefoneBruto = '(51) 98128-5818';
+    String nomeContato = 'Anderson';
+
+    try {
+      // 🔍 BUSCA COM TIMEOUT LIMITADO: Não trava a UI caso a rede falhe
+      final docAdmin = await FirebaseFirestore.instance
+          .collection('administradoras')
+          .doc(widget.idAdministradora)
+          .get()
+          .timeout(const Duration(seconds: 4));
+
+      if (docAdmin.exists && docAdmin.data() != null) {
+        final dadosAdmin = docAdmin.data() as Map<String, dynamic>;
+        nomeEmpresa = dadosAdmin['nome_empresa'] ?? nomeEmpresa;
+        cnpjEmpresa = dadosAdmin['cnpj'] ?? cnpjEmpresa;
+        emailEmpresa = dadosAdmin['email'] ?? emailEmpresa;
+        telefoneBruto = dadosAdmin['telefone'] ?? telefoneBruto;
+        nomeContato = dadosAdmin['nome_contato'] ?? nomeContato;
+      }
+    } catch (e) {
+      debugPrint('SaaS White-Label fallback usado: $e');
+    }
+
+    String foneNumeros = telefoneBruto.replaceAll(RegExp(r'[^0-9]'), '');
+    if (!foneNumeros.startsWith('55') && foneNumeros.isNotEmpty) {
+      foneNumeros = '55' + foneNumeros;
+    }
+    if (foneNumeros.isEmpty) foneNumeros = '5551981285818';
+
     var excel = Excel.createExcel();
     Sheet sheetObject = excel['Relatorio'];
     excel.setDefaultSheet('Relatorio');
@@ -3072,13 +4597,12 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
       fontSize: 16,
       fontColorHex: ExcelColor.fromHexString('#0D47A1'),
     );
-    sheetObject.appendRow([
-      TextCellValue('MC PRESTADORA DE SERVIÇOS CONDOMINIAIS LTDA'),
-    ]);
+    sheetObject.appendRow([TextCellValue(nomeEmpresa.toUpperCase())]);
     sheetObject
             .cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 0))
             .cellStyle =
         estiloEmpresa;
+
     sheetObject.appendRow([
       TextCellValue('Relatório de Consumo: ${widget.condominio}'),
     ]);
@@ -3178,6 +4702,7 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
 
     sheetObject.appendRow([TextCellValue('')]);
     sheetObject.appendRow([TextCellValue('---')]);
+
     CellStyle estiloPublicidade = CellStyle(
       bold: true,
       fontColorHex: ExcelColor.fromHexString('#E65100'),
@@ -3186,10 +4711,15 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
       bold: true,
       fontColorHex: ExcelColor.fromHexString('#0D47A1'),
     );
+    CellStyle estiloLinkDireto = CellStyle(
+      bold: true,
+      fontColorHex: ExcelColor.fromHexString('#0000FF'),
+      underline: Underline.Single,
+    );
 
     sheetObject.appendRow([
       TextCellValue(
-        'Esta leitura foi realizada pelo aplicativo oficial da MC Prestadora.',
+        'Esta leitura foi realizada pelo sistema oficial de medição da empresa $nomeEmpresa.',
       ),
     ]);
     sheetObject
@@ -3201,24 +4731,39 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
             )
             .cellStyle =
         estiloPublicidade;
+
+    sheetObject.appendRow([TextCellValue('CNPJ do Emissor: $cnpjEmpresa')]);
     sheetObject.appendRow([
-      TextCellValue('Para contratar nossos serviços ou obter informações:'),
+      TextCellValue('Para contratar serviços ou obter informações de suporte:'),
     ]);
+
+    int linhaEmail = sheetObject.maxRows;
     sheetObject.appendRow([
-      TextCellValue(
-        'E-mail: anderson.mcservicos@gmail.com  |  Telefone/WhatsApp: (51) 98128-5818',
+      FormulaCellValue(
+        '=HYPERLINK("mailto:$emailEmpresa", "✉️ E-mail: $emailEmpresa (Clique para enviar)")',
       ),
     ]);
     sheetObject
             .cell(
-              CellIndex.indexByColumnRow(
-                columnIndex: 0,
-                rowIndex: sheetObject.maxRows - 1,
-              ),
+              CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: linhaEmail),
             )
             .cellStyle =
-        estiloContato;
-    sheetObject.appendRow([TextCellValue('Falar com Anderson')]);
+        estiloLinkDireto;
+
+    int linhaWhats = sheetObject.maxRows;
+    sheetObject.appendRow([
+      FormulaCellValue(
+        '=HYPERLINK("https://wa.me/$foneNumeros", "💬 WhatsApp: $telefoneBruto (Clique para abrir a conversa)")',
+      ),
+    ]);
+    sheetObject
+            .cell(
+              CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: linhaWhats),
+            )
+            .cellStyle =
+        estiloLinkDireto;
+
+    sheetObject.appendRow([TextCellValue('Responsável: $nomeContato')]);
     sheetObject
             .cell(
               CellIndex.indexByColumnRow(
@@ -3257,13 +4802,14 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
             XFile(caminhoArquivo),
           ], text: 'Relatório Excel - ${widget.condominio}');
         } catch (e) {
-          if (context.mounted)
+          if (context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('Erro no celular: $e'),
+                content: Text('Erro ao compartilhar Excel: $e'),
                 backgroundColor: Colors.red,
               ),
             );
+          }
         }
       }
     }
@@ -3273,20 +4819,56 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
     BuildContext context,
     List<QueryDocumentSnapshot> leituras,
   ) async {
-    if (context.mounted)
+    // 🛑 FEEDBACK VISUAL IMEDIATO
+    if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Gerando Relatório Oficial...'),
+          content: Text('Gerando Relatório Oficial PDF...'),
           backgroundColor: Color(0xFF0D47A1),
           duration: Duration(seconds: 3),
         ),
       );
+    }
+
+    String nomeEmpresa = 'MC PRESTADORA DE SERVIÇOS CONDOMINIAIS LTDA';
+    String cnpjEmpresa = 'Não informado';
+    String emailEmpresa = 'anderson.mcservicos@gmail.com';
+    String telefoneBruto = '(51) 98128-5818';
+    String nomeContato = 'Anderson';
+
+    try {
+      // 🔍 BUSCA COM TIMEOUT
+      final docAdmin = await FirebaseFirestore.instance
+          .collection('administradoras')
+          .doc(widget.idAdministradora)
+          .get()
+          .timeout(const Duration(seconds: 4));
+
+      if (docAdmin.exists && docAdmin.data() != null) {
+        final dadosAdmin = docAdmin.data() as Map<String, dynamic>;
+        nomeEmpresa = dadosAdmin['nome_empresa'] ?? nomeEmpresa;
+        cnpjEmpresa = dadosAdmin['cnpj'] ?? cnpjEmpresa;
+        emailEmpresa = dadosAdmin['email'] ?? emailEmpresa;
+        telefoneBruto = dadosAdmin['telefone'] ?? telefoneBruto;
+        nomeContato = dadosAdmin['nome_contato'] ?? nomeContato;
+      }
+    } catch (e) {
+      debugPrint('SaaS White-Label fallback usado: $e');
+    }
+
+    String foneNumeros = telefoneBruto.replaceAll(RegExp(r'[^0-9]'), '');
+    if (!foneNumeros.startsWith('55') && foneNumeros.isNotEmpty) {
+      foneNumeros = '55' + foneNumeros;
+    }
+    if (foneNumeros.isEmpty) foneNumeros = '5551981285818';
 
     pw.MemoryImage? logoImage;
     try {
       final ByteData bytes = await rootBundle.load('assets/logo.png');
       logoImage = pw.MemoryImage(bytes.buffer.asUint8List());
-    } catch (e) {}
+    } catch (e) {
+      debugPrint('Aviso: Logo nativo ausente.');
+    }
 
     final pdf = pw.Document();
     List<pw.Widget> listaDeLeituras = [];
@@ -3305,7 +4887,9 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
           dados['url_foto'].toString().isNotEmpty) {
         try {
           imagemPdf = await networkImage(dados['url_foto']);
-        } catch (e) {}
+        } catch (e) {
+          debugPrint('Foto remota indisponível para o PDF.');
+        }
       }
 
       listaDeLeituras.add(
@@ -3401,7 +4985,7 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
                       pw.Text(
-                        "MC PRESTADORA DE SERVIÇOS",
+                        nomeEmpresa.toUpperCase(),
                         style: pw.TextStyle(
                           fontSize: 12,
                           fontWeight: pw.FontWeight.bold,
@@ -3411,9 +4995,16 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
                       pw.Text(
                         "Relatório Oficial - ${widget.condominio}",
                         style: pw.TextStyle(
-                          fontSize: 20,
+                          fontSize: 18,
                           fontWeight: pw.FontWeight.bold,
                           color: PdfColors.blueGrey900,
+                        ),
+                      ),
+                      pw.Text(
+                        "CNPJ: $cnpjEmpresa",
+                        style: const pw.TextStyle(
+                          fontSize: 9,
+                          color: PdfColors.grey700,
                         ),
                       ),
                     ],
@@ -3434,7 +5025,7 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
                 crossAxisAlignment: pw.CrossAxisAlignment.center,
                 children: [
                   pw.Text(
-                    "Esta leitura foi realizada pelo aplicativo oficial da MC Prestadora.",
+                    "Esta leitura foi realizada e auditada pelo sistema oficial de medição da empresa $nomeEmpresa.",
                     style: pw.TextStyle(
                       fontSize: 10,
                       fontWeight: pw.FontWeight.bold,
@@ -3443,34 +5034,43 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
                   ),
                   pw.SizedBox(height: 5),
                   pw.Text(
-                    "Para contratar nossos serviços ou obter informações:",
+                    "Para obter informações de faturamento ou suporte:",
                     style: const pw.TextStyle(fontSize: 9),
                   ),
+                  pw.SizedBox(height: 3),
                   pw.Row(
                     mainAxisAlignment: pw.MainAxisAlignment.center,
                     children: [
-                      pw.Text(
-                        "E-mail: anderson.mcservicos@gmail.com",
-                        style: pw.TextStyle(
-                          fontSize: 9,
-                          color: PdfColors.blue700,
-                          fontWeight: pw.FontWeight.bold,
+                      pw.UrlLink(
+                        destination: 'mailto:$emailEmpresa',
+                        child: pw.Text(
+                          "E-mail: $emailEmpresa",
+                          style: pw.TextStyle(
+                            fontSize: 9,
+                            color: PdfColors.blue700,
+                            fontWeight: pw.FontWeight.bold,
+                            decoration: pw.TextDecoration.underline,
+                          ),
                         ),
                       ),
                       pw.Text("  |  ", style: const pw.TextStyle(fontSize: 9)),
-                      pw.Text(
-                        "Telefone/WhatsApp: (51) 98128-5818",
-                        style: pw.TextStyle(
-                          fontSize: 9,
-                          color: PdfColors.blue700,
-                          fontWeight: pw.FontWeight.bold,
+                      pw.UrlLink(
+                        destination: 'https://wa.me/$foneNumeros',
+                        child: pw.Text(
+                          "Suporte WhatsApp: $telefoneBruto",
+                          style: pw.TextStyle(
+                            fontSize: 9,
+                            color: PdfColors.blue700,
+                            fontWeight: pw.FontWeight.bold,
+                            decoration: pw.TextDecoration.underline,
+                          ),
                         ),
                       ),
                     ],
                   ),
-                  pw.SizedBox(height: 3),
+                  pw.SizedBox(height: 4),
                   pw.Text(
-                    "Falar com Anderson",
+                    "Responsável Técnico: $nomeContato",
                     style: pw.TextStyle(
                       fontSize: 9,
                       fontWeight: pw.FontWeight.bold,
@@ -3485,6 +5085,7 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
       ),
     );
 
+    // 💡 AS VARIÁVEIS DO ARQUIVO AGORA ESTÃO NO ESCOPO CORRETO E SEGURO
     String prefixo = _gerarPrefixoMedidores(leituras);
     DateTime agora = DateTime.now();
     String dataArquivo =
@@ -3492,7 +5093,18 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
     String nomeFicheiro =
         '${prefixo}${widget.condominio.replaceAll(' ', '_')}_$dataArquivo.pdf';
 
-    await Printing.sharePdf(bytes: await pdf.save(), filename: nomeFicheiro);
+    try {
+      await Printing.sharePdf(bytes: await pdf.save(), filename: nomeFicheiro);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao compartilhar PDF: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -3512,10 +5124,12 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
             .where('condominio', isEqualTo: widget.condominio)
             .snapshots(),
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting)
+          if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty)
+          }
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
             return const Center(child: Text('Nenhuma leitura encontrada.'));
+          }
 
           var leiturasBrutas = snapshot.data!.docs;
 
@@ -3543,14 +5157,12 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
             }
           }
 
-          // 👇 BARREIRA DE TEMPO: FILTRAR PARA DEIXAR PASSAR APENAS O MÊS ATUAL
           DateTime hoje = DateTime.now();
           var leiturasFiltradas = mapaLeiturasUnicas.values.where((doc) {
             var dados = doc.data() as Map<String, dynamic>;
             DateTime dataLeitura =
                 (dados['data_hora'] as Timestamp? ?? Timestamp.now()).toDate();
 
-            // Se a leitura NÃO for deste mês ou deste ano, descarta imediatamente
             if (dataLeitura.month != hoje.month ||
                 dataLeitura.year != hoje.year) {
               return false;
@@ -3560,16 +5172,19 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
             String medidorStr = dados['medidor'].toString().toLowerCase();
 
             if (filtroAtual == 'Água' &&
-                (medidorStr.contains('água') || medidorStr.contains('agua')))
+                (medidorStr.contains('água') || medidorStr.contains('agua'))) {
               return true;
+            }
             if (filtroAtual == 'Gás' &&
-                (medidorStr.contains('gás') || medidorStr.contains('gas')))
+                (medidorStr.contains('gás') || medidorStr.contains('gas'))) {
               return true;
+            }
             if (filtroAtual == 'Energia' &&
                 (medidorStr.contains('luz') ||
                     medidorStr.contains('energia') ||
-                    medidorStr.contains('eletricidade')))
+                    medidorStr.contains('eletricidade'))) {
               return true;
+            }
 
             return false;
           }).toList();
@@ -3606,10 +5221,11 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
                           selectedColor: const Color(0xFF0D47A1),
                           backgroundColor: Colors.blueGrey.shade50,
                           onSelected: (bool selected) {
-                            if (selected)
+                            if (selected) {
                               setState(() {
                                 filtroAtual = filtro;
                               });
+                            }
                           },
                         ),
                       );
@@ -4690,6 +6306,134 @@ class _TelaCadastroLeituristaState extends State<TelaCadastroLeiturista> {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// ================================================================
+// TELA LISTA DA EQUIPE REGISTADA (Acessível via KPI do Dashboard)
+// ================================================================
+class TelaListaEquipe extends StatelessWidget {
+  final String idAdministradora;
+  const TelaListaEquipe({super.key, required this.idAdministradora});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF5F6FA),
+      appBar: AppBar(
+        title: const Text(
+          'Equipe Registada',
+          style: TextStyle(color: Colors.white),
+        ),
+        backgroundColor: Colors.blueGrey.shade900,
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('usuarios')
+            .where('id_administradora', isEqualTo: idAdministradora)
+            .where('cargo', isEqualTo: 'leiturista')
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(
+              child: CircularProgressIndicator(color: Colors.green),
+            );
+          }
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.group_off_rounded,
+                    size: 80,
+                    color: Colors.grey.shade400,
+                  ),
+                  const SizedBox(height: 15),
+                  const Text(
+                    'Nenhum leiturista na equipa.',
+                    style: TextStyle(
+                      fontSize: 18,
+                      color: Colors.grey,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          var equipe = snapshot.data!.docs;
+
+          return ListView.builder(
+            padding: const EdgeInsets.all(20),
+            itemCount: equipe.length,
+            itemBuilder: (context, index) {
+              var leiturista = equipe[index].data() as Map<String, dynamic>;
+              String nome = leiturista['nome'] ?? 'Sem nome';
+              String inicial = nome.isNotEmpty ? nome[0].toUpperCase() : '?';
+
+              return Card(
+                elevation: 2,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                margin: const EdgeInsets.only(bottom: 15),
+                child: ListTile(
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 10,
+                  ),
+                  leading: CircleAvatar(
+                    radius: 25,
+                    backgroundColor: Colors.green.shade100,
+                    child: Text(
+                      inicial,
+                      style: TextStyle(
+                        color: Colors.green.shade800,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 20,
+                      ),
+                    ),
+                  ),
+                  title: Text(
+                    nome,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  subtitle: Text(leiturista['email'] ?? 'Sem email'),
+                  trailing: const Icon(
+                    Icons.chevron_right_rounded,
+                    color: Colors.grey,
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+      // Botão Flutuante Rápido para adicionar mais
+      floatingActionButton: FloatingActionButton.extended(
+        backgroundColor: Colors.green.shade700,
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) =>
+                  TelaCadastroLeiturista(idAdministradora: idAdministradora),
+            ),
+          );
+        },
+        icon: const Icon(Icons.person_add_rounded, color: Colors.white),
+        label: const Text(
+          "Novo Leiturista",
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
       ),
     );
