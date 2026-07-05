@@ -468,14 +468,28 @@ class _TelaCondominiosState extends State<TelaCondominios>
   }
 
   void _mostrarToast(String msg, Color cor) {
+    if (!mounted) return;
+
+    // Limpa qualquer mensagem antiga para não sobrepor
+    ScaffoldMessenger.of(context).clearSnackBars();
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(msg, style: const TextStyle(fontWeight: FontWeight.w500)),
         backgroundColor: cor,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        duration: const Duration(seconds: 3),
+        dismissDirection: DismissDirection.up, // Permite arrastar pra cima
+        margin: EdgeInsets.only(
+          bottom:
+              MediaQuery.of(context).size.height -
+              130, // 👈 AQUI: Empurra a barra para o topo da tela
+          left: 16,
+          right: 16,
+        ),
+        duration: const Duration(
+          milliseconds: 1500,
+        ), // 👈 AQUI: Duração de 1.5 segundos
       ),
     );
   }
