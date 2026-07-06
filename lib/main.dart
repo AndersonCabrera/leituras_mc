@@ -11,7 +11,7 @@ import 'package:universal_html/html.dart' as html;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
 import 'dart:typed_data';
-import 'package:excel/excel.dart' hide Border;
+import 'package:excel/excel.dart' hide BorderStyle, Border;
 import 'dart:io' as io;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:path_provider/path_provider.dart';
@@ -380,42 +380,65 @@ class _TelaCondominiosState extends State<TelaCondominios>
 
     setState(() => _sincronizandoAgora = true);
     int sucessoCount = 0;
+    String? ultimoErro;
 
     for (var linha in fila) {
+      int idLocal = linha['id'];
+      String itemJson = linha['dados'];
+      Map<String, dynamic> dados = jsonDecode(itemJson);
+
       try {
-        int idLocal = linha['id'];
-        String itemJson = linha['dados'];
-        Map<String, dynamic> dados = jsonDecode(itemJson);
         String? urlFotoFirebase;
         String? caminhoLocal = dados['caminho_foto_local'];
 
-        if (caminhoLocal != null && !caminhoLocal.startsWith('base64:')) {
-          io.File arquivoLocal = io.File(caminhoLocal);
-          if (await arquivoLocal.exists()) {
-            final ref = FirebaseStorage.instance.ref().child(
-              'comprovantes/foto_${DateTime.now().millisecondsSinceEpoch}.jpg',
+        // 🛡️ REGLA 1: ISOLAMENTO CRÍTICO DA FOTO
+        // Envolvemos o upload da foto num try-catch próprio. Se a foto falhar, o texto continua!
+        if (caminhoLocal != null) {
+          try {
+            if (!caminhoLocal.startsWith('base64:')) {
+              io.File arquivoLocal = io.File(caminhoLocal);
+              if (await arquivoLocal.exists()) {
+                final ref = FirebaseStorage.instance.ref().child(
+                  'comprovantes/foto_${DateTime.now().millisecondsSinceEpoch}.jpg',
+                );
+                await ref
+                    .putFile(
+                      arquivoLocal,
+                      SettableMetadata(contentType: 'image/jpeg'),
+                    )
+                    .timeout(
+                      const Duration(seconds: 15),
+                    ); // Timeout para não prender o app
+
+                urlFotoFirebase = await ref.getDownloadURL();
+                await arquivoLocal.delete(); // Apaga do telemóvel após subir
+              }
+            } else {
+              final Uint8List imageBytes = base64Decode(
+                caminhoLocal.replaceAll('base64:', ''),
+              );
+              final ref = FirebaseStorage.instance.ref().child(
+                'comprovantes/foto_${DateTime.now().millisecondsSinceEpoch}.jpg',
+              );
+              final tarefa = await ref
+                  .putData(
+                    imageBytes,
+                    SettableMetadata(contentType: 'image/jpeg'),
+                  )
+                  .timeout(const Duration(seconds: 15));
+
+              urlFotoFirebase = await tarefa.ref.getDownloadURL();
+            }
+          } catch (fotoError) {
+            // Se a foto falhar (ex: timeout no 4G), fazemos log e continuamos para salvar o texto!
+            debugPrint(
+              "⚠️ Falha ao subir foto (Apto ${dados['apartamento']}): $fotoError",
             );
-            await ref.putFile(
-              arquivoLocal,
-              SettableMetadata(contentType: 'image/jpeg'),
-            );
-            urlFotoFirebase = await ref.getDownloadURL();
-            await arquivoLocal.delete();
+            ultimoErro = "Falha no upload da foto, enviando apenas texto...";
           }
-        } else if (caminhoLocal != null && caminhoLocal.startsWith('base64:')) {
-          final Uint8List imageBytes = base64Decode(
-            caminhoLocal.replaceAll('base64:', ''),
-          );
-          final ref = FirebaseStorage.instance.ref().child(
-            'comprovantes/foto_${DateTime.now().millisecondsSinceEpoch}.jpg',
-          );
-          final tarefa = await ref.putData(
-            imageBytes,
-            SettableMetadata(contentType: 'image/jpeg'),
-          );
-          urlFotoFirebase = await tarefa.ref.getDownloadURL();
         }
 
+        // Preparação do pacote de texto
         DateTime dataLeitura = DateTime.parse(dados['data_hora_string']);
         String mesAno = "${dataLeitura.month}_${dataLeitura.year}";
         String idUnicoDoc =
@@ -435,19 +458,34 @@ class _TelaCondominiosState extends State<TelaCondominios>
           'correcao_manual': dados['correcao_manual'] ?? false,
           'data_hora': Timestamp.fromDate(dataLeitura),
         };
-        if (urlFotoFirebase != null) pacote['url_foto'] = urlFotoFirebase;
 
+        // Se a foto subiu com sucesso, anexa a URL, senão guarda sem URL para não perder o texto
+        if (urlFotoFirebase != null) {
+          pacote['url_foto'] = urlFotoFirebase;
+        } else if (dados['tem_foto_anexada'] == true) {
+          pacote['erro_sincronizacao_foto'] =
+              true; // Marca que o texto foi, mas a foto falhou
+        }
+
+        // Envia para o Firestore
         await FirebaseFirestore.instance
             .collection('leituras')
             .doc(idUnicoDoc)
-            .set(pacote, SetOptions(merge: true));
+            .set(pacote, SetOptions(merge: true))
+            .timeout(const Duration(seconds: 10));
 
-        // Só remove do SQLite SE e QUANDO a nuvem confirmar recebimento
+        // 🔥 SÓ REMOVE DO SQLITE SE O TEXTO FOR SALVO COM SUCESSO
         await BancoLocal.remover(idLocal, itemJson);
         sucessoCount++;
       } catch (e) {
-        debugPrint("Falha ao sincronizar: $e");
+        // Se cair aqui, o erro é do Firestore (ex: Regras de segurança ou falta de login)
+        debugPrint("❌ Falha fatal no item (Apto ${dados['apartamento']}): $e");
+        ultimoErro = "Apto ${dados['apartamento']}: $e";
         if (mounted) setState(() => _isOnline = false);
+
+        // Importante: NÃO damos return aqui! O 'continue' do loop vai tentar enviar o próximo
+        // apartamento, garantindo que um erro no apto 101 não trave os outros 29!
+        continue;
       }
     }
 
@@ -458,10 +496,20 @@ class _TelaCondominiosState extends State<TelaCondominios>
         _totalPendentes = novaFila.length;
         if (sucessoCount > 0) _isOnline = true;
       });
+
+      // Feedback para o utilizador
       if (sucessoCount > 0) {
         _mostrarToast(
-          '✓ $sucessoCount leitura(s) sincronizada(s)!',
+          '✓ $sucessoCount leitura(s) sincronizada(s) com sucesso!',
           Colors.green.shade700,
+        );
+      }
+
+      // Se houve algum erro na fila, avisa explicitamente o que travou
+      if (ultimoErro != null && sucessoCount == 0) {
+        _mostrarToast(
+          '⚠️ Sincronização travada: $ultimoErro',
+          Colors.red.shade900,
         );
       }
     }
@@ -469,27 +517,24 @@ class _TelaCondominiosState extends State<TelaCondominios>
 
   void _mostrarToast(String msg, Color cor) {
     if (!mounted) return;
-
-    // Limpa qualquer mensagem antiga para não sobrepor
     ScaffoldMessenger.of(context).clearSnackBars();
-
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(msg, style: const TextStyle(fontWeight: FontWeight.w500)),
         backgroundColor: cor,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        dismissDirection: DismissDirection.up, // Permite arrastar pra cima
+        dismissDirection: DismissDirection.up,
         margin: EdgeInsets.only(
           bottom:
               MediaQuery.of(context).size.height -
-              130, // 👈 AQUI: Empurra a barra para o topo da tela
+              130, // Empurra para o topo do ecrã
           left: 16,
           right: 16,
         ),
         duration: const Duration(
-          milliseconds: 1500,
-        ), // 👈 AQUI: Duração de 1.5 segundos
+          milliseconds: 3000,
+        ), // Tempo suficiente para ler o erro
       ),
     );
   }
@@ -2980,9 +3025,117 @@ class _TelaSincronizacaoState extends State<TelaSincronizacao> {
   }
 }
 
+// ============================================================================
+// TELA PRINCIPAL: PAINEL DA ADMINISTRADORA
+// ============================================================================
 class TelaAdminDashboard extends StatelessWidget {
   final String idAdministradora;
   const TelaAdminDashboard({super.key, required this.idAdministradora});
+
+  void _mostrarAlertaBreve(BuildContext context) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Funcionalidade em desenvolvimento para a próxima versão.',
+        ),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  // O PAYWALL: Verifica se o cliente paga o plano Premium
+  Future<void> _abrirPersonalizacaoPremium(BuildContext context) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      var doc = await FirebaseFirestore.instance
+          .collection('administradoras')
+          .doc(idAdministradora)
+          .get();
+      bool isPremium =
+          (doc.data() as Map<String, dynamic>?)?['plano_premium'] == true;
+
+      if (context.mounted) Navigator.pop(context); // Fecha o loading
+
+      if (isPremium) {
+        if (context.mounted) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) =>
+                  TelaConfiguracoesMarca(idAdministradora: idAdministradora),
+            ),
+          );
+        }
+      } else {
+        if (context.mounted) _mostrarUpsellPremium(context);
+      }
+    } catch (e) {
+      if (context.mounted) Navigator.pop(context);
+    }
+  }
+
+  // A TELA DE UPGRADE (A isca de vendas)
+  void _mostrarUpsellPremium(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: const [
+            Icon(Icons.star_rounded, color: Colors.amber, size: 30),
+            SizedBox(width: 10),
+            Text(
+              'Recurso Premium',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        content: const Text(
+          'A personalização avançada de relatórios (inserção do seu Logótipo e contactos oficiais em PDF) é uma funcionalidade exclusiva do Plano White-Label.\n\n'
+          'Destaque a sua marca perante os síndicos e passe uma imagem de topo. Fale com o nosso suporte para fazer o upgrade da sua conta!',
+          style: TextStyle(fontSize: 15),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text(
+              'AGORA NÃO',
+              style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold),
+            ),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(ctx);
+              // Aqui pode colocar um link para o WhatsApp no futuro
+            },
+            icon: const Icon(
+              Icons.rocket_launch_rounded,
+              color: Colors.white,
+              size: 18,
+            ),
+            label: const Text(
+              'FAZER UPGRADE',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.amber.shade700,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -3062,7 +3215,7 @@ class TelaAdminDashboard extends StatelessWidget {
                   ),
                   child: Row(
                     children: [
-                      // 👇 CARTÃO PRÉDIOS AGORA É CLICÁVEL
+                      // KPI: Prédios
                       Expanded(
                         child: _kpiCard(
                           'Prédios',
@@ -3086,7 +3239,7 @@ class TelaAdminDashboard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 12),
-                      // 👇 CARTÃO EQUIPE AGORA É CLICÁVEL E LEVA PARA A NOVA TELA
+                      // KPI: Equipe
                       Expanded(
                         child: _kpiCard(
                           'Equipe',
@@ -3117,14 +3270,74 @@ class TelaAdminDashboard extends StatelessWidget {
             ),
           ),
 
+          // DASHBOARD DE PROGRESSO OPERACIONAL
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: const [
+                        Text(
+                          'Progresso das Leituras (Mês)',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF1A1A2E),
+                          ),
+                        ),
+                        Text(
+                          '85%',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    LinearProgressIndicator(
+                      value: 0.85,
+                      backgroundColor: Colors.grey.shade100,
+                      color: Colors.blue.shade600,
+                      minHeight: 8,
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Auditoria: 3.400 de 4.000 medidores processados em campo.',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // AÇÕES RÁPIDAS
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Ações Rápidas',
+                    'Operações',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -3132,7 +3345,6 @@ class TelaAdminDashboard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 15),
-                  // 👇 Substituímos o GridView por uma Row idêntica à dos KPIs
                   Row(
                     children: [
                       Expanded(
@@ -3172,11 +3384,52 @@ class TelaAdminDashboard extends StatelessWidget {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 15),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _actionCard(
+                          context,
+                          'Auditoria',
+                          'Revisar Anomalias',
+                          Icons.policy_rounded,
+                          Colors.red.shade600,
+                          () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => TelaAuditoria(
+                                idAdministradora: idAdministradora,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 15),
+                      Expanded(
+                        child: _actionCard(
+                          context,
+                          'Fechar Lote',
+                          'Bloquear Mês',
+                          Icons.lock_rounded,
+                          Colors.indigo.shade600,
+                          () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => TelaFechamentoLote(
+                                idAdministradora: idAdministradora,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
           ),
 
+          // CADASTROS DO SISTEMA
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -3184,7 +3437,7 @@ class TelaAdminDashboard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Cadastros do Sistema',
+                    'Cadastros',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -3268,7 +3521,59 @@ class TelaAdminDashboard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  const SizedBox(height: 40),
+                ],
+              ),
+            ),
+          ),
+
+          // CONFIGURAÇÕES WHITE-LABEL SELF-SERVICE
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Definições da Marca',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF1A1A2E),
+                    ),
+                  ),
+                  const SizedBox(height: 15),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(15),
+                      border: Border.all(color: Colors.grey.shade200),
+                    ),
+                    child: ListTile(
+                      leading: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.teal.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(
+                          Icons.brush_rounded,
+                          color: Colors.teal.shade700,
+                        ),
+                      ),
+                      title: const Text(
+                        'Personalizar Relatórios',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      subtitle: const Text(
+                        'Upload de logótipo e contactos oficiais',
+                      ),
+                      trailing: const Icon(
+                        Icons.chevron_right_rounded,
+                        color: Colors.grey,
+                      ),
+                      onTap: () => _abrirPersonalizacaoPremium(context),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -3278,7 +3583,6 @@ class TelaAdminDashboard extends StatelessWidget {
     );
   }
 
-  // 👇 O CARTÃO KPI AGORA RECEBE A AÇÃO ONTAP
   Widget _kpiCard(
     String titulo,
     IconData icon,
@@ -3299,7 +3603,7 @@ class TelaAdminDashboard extends StatelessWidget {
         ],
       ),
       child: Material(
-        color: Colors.transparent, // Para o efeito de clique aparecer
+        color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(16),
@@ -3313,7 +3617,7 @@ class TelaAdminDashboard extends StatelessWidget {
                 StreamBuilder<QuerySnapshot>(
                   stream: stream,
                   builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
+                    if (snapshot.connectionState == ConnectionState.waiting)
                       return const Text(
                         '...',
                         style: TextStyle(
@@ -3321,7 +3625,6 @@ class TelaAdminDashboard extends StatelessWidget {
                           fontWeight: FontWeight.bold,
                         ),
                       );
-                    }
                     int count = snapshot.data?.docs.length ?? 0;
                     return Text(
                       count.toString(),
@@ -3360,7 +3663,6 @@ class TelaAdminDashboard extends StatelessWidget {
     );
   }
 
-  // 👇 Cartão ajustado: Removemos o Spacer e colocamos a mesma estrutura do KPI
   Widget _actionCard(
     BuildContext context,
     String titulo,
@@ -3400,9 +3702,7 @@ class TelaAdminDashboard extends StatelessWidget {
                   ),
                   child: Icon(icon, color: cor, size: 24),
                 ),
-                const SizedBox(
-                  height: 16,
-                ), // Substituímos o Spacer() por um espaço fixo
+                const SizedBox(height: 16),
                 Text(
                   titulo,
                   style: const TextStyle(
@@ -3421,6 +3721,365 @@ class TelaAdminDashboard extends StatelessWidget {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// TELAS EXTRAS: AUDITORIA, FECHAMENTO E CONFIGURAÇÕES DA MARCA
+// ============================================================================
+
+class TelaAuditoria extends StatelessWidget {
+  final String idAdministradora;
+  const TelaAuditoria({super.key, required this.idAdministradora});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Auditoria de Anomalias',
+          style: TextStyle(color: Colors.white),
+        ),
+        backgroundColor: Colors.red.shade700,
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('leituras')
+            .where('id_administradora', isEqualTo: idAdministradora)
+            .where('tem_foto_anexada', isEqualTo: true)
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting)
+            return const Center(child: CircularProgressIndicator());
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty)
+            return const Center(
+              child: Text(
+                'Nenhuma anomalia para revisar. ✅',
+                style: TextStyle(fontSize: 16, color: Colors.grey),
+              ),
+            );
+
+          var docs = snapshot.data!.docs;
+          return ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: docs.length,
+            itemBuilder: (context, index) {
+              var dados = docs[index].data() as Map<String, dynamic>;
+              return Card(
+                elevation: 2,
+                margin: const EdgeInsets.only(bottom: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 80,
+                        height: 80,
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade200,
+                          borderRadius: BorderRadius.circular(8),
+                          image: dados['url_foto'] != null
+                              ? DecorationImage(
+                                  image: NetworkImage(dados['url_foto']),
+                                  fit: BoxFit.cover,
+                                )
+                              : null,
+                        ),
+                        child: dados['url_foto'] == null
+                            ? const Icon(
+                                Icons.image_not_supported,
+                                color: Colors.grey,
+                              )
+                            : null,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${dados['condominio']} - Apto ${dados['apartamento']}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                            Text(
+                              'Medidor: ${dados['medidor']}',
+                              style: const TextStyle(color: Colors.grey),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Consumo Apurado: ${dados['consumo']?.toStringAsFixed(3)}',
+                              style: const TextStyle(
+                                color: Colors.red,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// TELA 2: FECHAMENTO DE LOTE (Bloqueia o mês)
+// ============================================================================
+class TelaFechamentoLote extends StatelessWidget {
+  final String idAdministradora;
+  const TelaFechamentoLote({super.key, required this.idAdministradora});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Fechamento de Lote',
+          style: TextStyle(color: Colors.white),
+        ),
+        backgroundColor: Colors.indigo.shade700,
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('predios')
+            .where('id_administradora', isEqualTo: idAdministradora)
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData)
+            return const Center(child: CircularProgressIndicator());
+
+          if (snapshot.data!.docs.isEmpty) {
+            return const Center(
+              child: Text(
+                'Nenhum prédio cadastrado ainda.',
+                style: TextStyle(fontSize: 16, color: Colors.grey),
+              ),
+            );
+          }
+
+          return ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: snapshot.data!.docs.length,
+            itemBuilder: (context, index) {
+              var predio = snapshot.data!.docs[index];
+              var dadosPredio = predio.data() as Map<String, dynamic>? ?? {};
+
+              // 👇 Usando o campo exato descoberto pelo nosso Raio-X
+              String nomeDoPredio =
+                  dadosPredio['nome_predio'] ?? 'Prédio Sem Nome';
+
+              return Card(
+                elevation: 2,
+                margin: const EdgeInsets.only(bottom: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: ListTile(
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  leading: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.indigo.shade50,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      Icons.domain_rounded,
+                      color: Colors.indigo.shade700,
+                    ),
+                  ),
+                  title: Text(
+                    nomeDoPredio,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  subtitle: const Padding(
+                    padding: EdgeInsets.only(top: 4),
+                    child: Text(
+                      'Bloquear edições de leitura neste mês.',
+                      style: TextStyle(fontSize: 13),
+                    ),
+                  ),
+                  trailing: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.indigo.shade600,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    icon: const Icon(
+                      Icons.lock_outline_rounded,
+                      size: 16,
+                      color: Colors.white,
+                    ),
+                    label: const Text(
+                      'FECHAR',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    onPressed: () {
+                      // Aqui entrará futuramente a lógica de atualizar o status do mês no Firebase
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Lote bloqueado com sucesso! Nenhuma leitura será alterada.',
+                          ),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+class TelaConfiguracoesMarca extends StatelessWidget {
+  final String idAdministradora;
+  const TelaConfiguracoesMarca({super.key, required this.idAdministradora});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Personalização Premium',
+          style: TextStyle(color: Colors.white),
+        ),
+        backgroundColor: Colors.teal.shade700,
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.amber.shade50,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.amber.shade300),
+              ),
+              child: Row(
+                children: const [
+                  Icon(
+                    Icons.workspace_premium_rounded,
+                    color: Colors.amber,
+                    size: 30,
+                  ),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Plano White-Label. As configurações abaixo aparecerão em todos os PDFs oficiais gerados.',
+                      style: TextStyle(color: Colors.black87),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 30),
+            const Text(
+              'Logótipo Oficial',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+            const SizedBox(height: 10),
+            InkWell(
+              onTap: () {},
+              child: Container(
+                height: 120,
+                width: 200,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade200,
+                  borderRadius: BorderRadius.circular(12),
+                  // 🔥 Correção do erro da borda (BorderStyle foi removido para não dar conflito com o excel.dart)
+                  border: Border.all(color: Colors.grey.shade300, width: 1.0),
+                ),
+                child: const Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.upload_file_rounded,
+                      color: Colors.grey,
+                      size: 30,
+                    ),
+                    SizedBox(height: 8),
+                    Text('Enviar imagem', style: TextStyle(color: Colors.grey)),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 30),
+            const Text(
+              'Contactos do Relatório',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+            const SizedBox(height: 15),
+            TextFormField(
+              decoration: const InputDecoration(
+                labelText: 'E-mail de Suporte',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.email),
+              ),
+            ),
+            const SizedBox(height: 15),
+            TextFormField(
+              decoration: const InputDecoration(
+                labelText: 'WhatsApp de Suporte',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.phone),
+              ),
+            ),
+            const SizedBox(height: 30),
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.teal.shade700,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                onPressed: () => Navigator.pop(context),
+                child: const Text(
+                  'SALVAR ALTERAÇÕES',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
