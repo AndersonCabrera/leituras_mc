@@ -390,9 +390,9 @@ class _TelaCondominiosState extends State<TelaCondominios>
       try {
         String? urlFotoFirebase;
         String? caminhoLocal = dados['caminho_foto_local'];
+        bool falhaNoUploadDaFoto = false; // 👈 Controle local de falha de mídia
 
-        // 🛡️ REGLA 1: ISOLAMENTO CRÍTICO DA FOTO
-        // Envolvemos o upload da foto num try-catch próprio. Se a foto falhar, o texto continua!
+        // 🛡️ REGRA 1: ISOLAMENTO CRÍTICO DA FOTO
         if (caminhoLocal != null) {
           try {
             if (!caminhoLocal.startsWith('base64:')) {
@@ -430,12 +430,21 @@ class _TelaCondominiosState extends State<TelaCondominios>
               urlFotoFirebase = await tarefa.ref.getDownloadURL();
             }
           } catch (fotoError) {
-            // Se a foto falhar (ex: timeout no 4G), fazemos log e continuamos para salvar o texto!
             debugPrint(
               "⚠️ Falha ao subir foto (Apto ${dados['apartamento']}): $fotoError",
             );
+            falhaNoUploadDaFoto = true; // 👈 Sinaliza que o upload falhou
             ultimoErro = "Falha no upload da foto, enviando apenas texto...";
           }
+        }
+
+        // 🛡️ NOVA REGRA DE SEGURANÇA: Se a foto era obrigatória e falhou, impede a subida do texto
+        // O 'continue' salta este apartamento preservando-o intacto no SQLite com a foto local,
+        // mas deixa a fila continuar enviando as leituras normais sem travar o aplicativo!
+        if (dados['tem_foto_anexada'] == true && falhaNoUploadDaFoto) {
+          ultimoErro =
+              "Apto ${dados['apartamento']}: Aguardando conexão estável para subir imagem de auditoria.";
+          continue;
         }
 
         // Preparação do pacote de texto
@@ -1520,6 +1529,9 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
   String? idLeituraExistente;
   bool houveTrocaOuCorrecao = false;
 
+  // 👇 VARIÁVEL DE TRAVA DE SEGURANÇA
+  bool loteFechado = false;
+
   final ImagePicker _picker = ImagePicker();
   XFile? fotoComprovante;
 
@@ -1527,8 +1539,6 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
   bool processandoIA = false;
 
   final TextEditingController _leituraCtrl = TextEditingController();
-
-  // 👇 1. CRIADO O GESTOR DE FOCO DO TECLADO
   final FocusNode _focusNode = FocusNode();
 
   @override
@@ -1537,11 +1547,14 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
   @override
   void initState() {
     super.initState();
-    if (widget.medidores.isNotEmpty) _buscarLeituraAnterior();
+    if (widget.medidores.isNotEmpty) {
+      _buscarLeituraAnterior();
+      _verificarLoteFechado(); // 👈 Verifica o status do lote ao abrir
+    }
 
-    // 👇 Chama o teclado automaticamente na primeira vez que abre o app
     Future.delayed(const Duration(milliseconds: 300), () {
-      if (mounted) _focusNode.requestFocus();
+      // 👈 Só levanta o teclado se o lote NÃO estiver fechado
+      if (mounted && !loteFechado) _focusNode.requestFocus();
     });
   }
 
@@ -1549,34 +1562,72 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
   void didUpdateWidget(ApartamentoLeituraPage old) {
     super.didUpdateWidget(old);
 
-    // 👇 2. SE MUDOU DE MEDIDOR OU DE APARTAMENTO
     if (old.medidorSelecionado != widget.medidorSelecionado ||
         old.apartamento != widget.apartamento) {
       setState(() {
         leituraAnterior = null;
         referenciaAnterior = '--/----';
         carregandoLeitura = true;
+        loteFechado = false; // Reset da trava para garantir validação limpa
 
-        // 🧹 LIMPEZA OBRIGATÓRIA (Apaga o que foi digitado no medidor/apto anterior)
         _leituraCtrl.clear();
         leituraAtual = null;
         consumoCalculado = null;
         houveTrocaOuCorrecao = false;
       });
       _buscarLeituraAnterior();
+      _verificarLoteFechado(); // 👈 Verifica o lote sempre que muda de apto
 
-      // ⌨️ SOBE O TECLADO AUTOMATICAMENTE NA TROCA
       Future.delayed(const Duration(milliseconds: 150), () {
-        if (mounted) _focusNode.requestFocus();
+        if (mounted && !loteFechado) _focusNode.requestFocus();
       });
     }
   }
 
   @override
   void dispose() {
-    _focusNode.dispose(); // Elimina o foco da memória para não vazar
+    _focusNode.dispose();
     _leituraCtrl.dispose();
     super.dispose();
+  }
+
+  // 🔥 NOVA FUNÇÃO: PERGUNTA AO BANCO SE O LOTE FOI ENCERRADO PELA ADMIN
+  Future<void> _verificarLoteFechado() async {
+    try {
+      DateTime agora = DateTime.now();
+      String mesAtual = "${agora.month}_${agora.year}";
+
+      // Procura o prédio atual no banco (tenta pelos nomes de campo mais comuns)
+      var query = await FirebaseFirestore.instance
+          .collection('predios')
+          .where('nome_predio', isEqualTo: widget.condominio)
+          .limit(1)
+          .get();
+
+      if (query.docs.isEmpty) {
+        query = await FirebaseFirestore.instance
+            .collection('predios')
+            .where('condominio', isEqualTo: widget.condominio)
+            .limit(1)
+            .get();
+      }
+
+      if (query.docs.isNotEmpty) {
+        var dados = query.docs.first.data();
+        List<dynamic> lotes = dados['lotes_fechados'] ?? [];
+        if (mounted) {
+          setState(() {
+            loteFechado = lotes.contains(mesAtual);
+            if (loteFechado) {
+              _focusNode
+                  .unfocus(); // Se estava aberto, esconde o teclado à força!
+            }
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("Erro ao verificar trava do lote: $e");
+    }
   }
 
   String _nomeMedidor(String id) {
@@ -1819,12 +1870,15 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
   void _verificarEGuardar() {
     if (leituraAtual != null &&
         leituraAnterior != null &&
-        leituraAnterior! > 0 &&
         !houveTrocaOuCorrecao) {
-      double limiteDeAlerta = leituraAnterior! * 1.30;
+      double limiteConsumoSeguro = 7.0;
 
-      if (leituraAtual! > limiteDeAlerta) {
+      if (consumoCalculado! > limiteConsumoSeguro) {
         if (fotoComprovante == null) {
+          String unidadeAtual = _unidadeMedidor(
+            widget.medidorSelecionado ?? '',
+          );
+
           showDialog(
             context: context,
             barrierDismissible: false,
@@ -1848,17 +1902,16 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                 ],
               ),
               content: Text(
-                'O consumo apurado é mais de 30% superior à leitura do mês passado.\n\n'
-                'Leitura Anterior: ${leituraAnterior!.toStringAsFixed(3).replaceAll('.', ',')}\n'
-                'Leitura Digitada: ${leituraAtual!.toStringAsFixed(3).replaceAll('.', ',')}\n\n'
-                'Para registrar um aumento tão expressivo, o sistema exige uma foto do medidor para fins de auditoria.',
+                'Alerta de Consumo Elevado!\n\n'
+                'O consumo calculado (${consumoCalculado!.toStringAsFixed(3).replaceAll('.', ',')} $unidadeAtual) ultrapassou o limite seguro de $limiteConsumoSeguro $unidadeAtual.\n\n'
+                'Para evitar erros de digitação e permitir auditoria posterior, tire uma foto do visor do medidor.',
                 style: const TextStyle(fontSize: 15),
               ),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(context),
                   child: const Text(
-                    'CANCELAR',
+                    'CORRIGIR TEXTO',
                     style: TextStyle(
                       color: Colors.grey,
                       fontWeight: FontWeight.bold,
@@ -1886,69 +1939,6 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                     backgroundColor: Colors.red.shade700,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-          return;
-        } else {
-          showDialog(
-            context: context,
-            barrierDismissible: false,
-            builder: (context) => AlertDialog(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              title: Row(
-                children: const [
-                  Icon(
-                    Icons.warning_amber_rounded,
-                    color: Colors.orange,
-                    size: 30,
-                  ),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Confirmar Valor Alto',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ],
-              ),
-              content: Text(
-                'A foto de auditoria está anexada, mas o consumo apurado é consideravelmente alto.\n\n'
-                'Confirma que o valor inserido (${leituraAtual!.toStringAsFixed(3).replaceAll('.', ',')}) bate exatamente com o visor do medidor físico?',
-                style: const TextStyle(fontSize: 15),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text(
-                    'CORRIGIR DÍGITO',
-                    style: TextStyle(
-                      color: Colors.grey,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                ElevatedButton(
-                  onPressed: () {
-                    Navigator.pop(context);
-                    _salvarNaCaixaDeSaida();
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange.shade700,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  child: const Text(
-                    'SIM, SALVAR',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
                     ),
                   ),
                 ),
@@ -2010,31 +2000,23 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
     }
   }
 
-  // 👇 3. TOAST AJUSTADO: Rápido e no Topo da tela!
   void _toast(String msg, Color cor) {
     if (!mounted) return;
 
-    // Limpa a fila para as mensagens não encavalarem
     ScaffoldMessenger.of(context).clearSnackBars();
-
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(msg, style: const TextStyle(fontWeight: FontWeight.w500)),
         backgroundColor: cor,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        dismissDirection:
-            DismissDirection.up, // Permite arrastar pra cima para fechar
+        dismissDirection: DismissDirection.up,
         margin: EdgeInsets.only(
-          bottom:
-              MediaQuery.of(context).size.height -
-              150, // 👈 Empurra lá para o TOPO
+          bottom: MediaQuery.of(context).size.height - 150,
           left: 16,
           right: 16,
         ),
-        duration: const Duration(
-          milliseconds: 1500,
-        ), // 👈 Duração curta (1.5 segundos)
+        duration: const Duration(milliseconds: 1500),
       ),
     );
   }
@@ -2107,7 +2089,9 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
         consumoCalculado! < 0 &&
         !houveTrocaOuCorrecao;
 
-    final podeSalvar = _leituraCtrl.text.isNotEmpty && !leituraInvalida;
+    // 👇 O botão de guardar agora exige que o lote esteja ABERTO
+    final podeSalvar =
+        _leituraCtrl.text.isNotEmpty && !leituraInvalida && !loteFechado;
     final medidorAtual = widget.medidorSelecionado ?? '';
     final unidade = _unidadeMedidor(medidorAtual);
 
@@ -2144,6 +2128,39 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                   ),
                 ),
                 const SizedBox(height: 20),
+
+                // 🛑 AVISO DE LOTE FECHADO
+                if (loteFechado)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 20),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: Colors.red.shade200,
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.lock_rounded, color: Colors.red.shade700),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'Lote Encerrado.\nA administradora bloqueou o envio ou edição de leituras para este prédio.',
+                            style: TextStyle(
+                              color: Colors.red.shade900,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
 
                 if (widget.medidores.length > 1)
                   SingleChildScrollView(
@@ -2261,7 +2278,9 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
 
                 Container(
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: loteFechado
+                        ? Colors.grey.shade100
+                        : Colors.white, // Muda de cor se fechado
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                       color: leituraInvalida
@@ -2289,23 +2308,23 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                         padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
                         child: Row(
                           children: [
-                            const Icon(
+                            Icon(
                               Icons.speed_rounded,
-                              color: _azul,
+                              color: loteFechado ? Colors.grey : _azul,
                               size: 18,
                             ),
                             const SizedBox(width: 8),
-                            const Text(
+                            Text(
                               'Leitura atual',
                               style: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w600,
-                                color: _azul,
+                                color: loteFechado ? Colors.grey : _azul,
                               ),
                             ),
                             const Spacer(),
                             GestureDetector(
-                              onTap: _abrirMenuSecundario,
+                              onTap: loteFechado ? null : _abrirMenuSecundario,
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 10,
@@ -2341,18 +2360,20 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                       ),
                       TextField(
                         controller: _leituraCtrl,
-                        focusNode:
-                            _focusNode, // 👈 VINCULANDO O FOCO AO CAMPO AQUI
+                        focusNode: _focusNode,
+                        readOnly: loteFechado, // 👈 IMPEDE DIGITAÇÃO SE FECHADO
                         keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,
                         ),
                         textAlign: TextAlign.center,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 44,
                           fontWeight: FontWeight.w700,
-                          color: Color(0xFF1A1A2E),
+                          color: loteFechado
+                              ? Colors.grey
+                              : const Color(0xFF1A1A2E),
                           letterSpacing: 1,
-                          fontFeatures: [FontFeature.tabularFigures()],
+                          fontFeatures: const [FontFeature.tabularFigures()],
                         ),
                         decoration: InputDecoration(
                           hintText: '0000,000',
@@ -2461,7 +2482,9 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                 const SizedBox(height: 10),
 
                 GestureDetector(
-                  onTap: fotoComprovante == null ? _tirarFotoManual : null,
+                  onTap: (fotoComprovante == null && !loteFechado)
+                      ? _tirarFotoManual
+                      : null,
                   child: Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 16,
@@ -2497,8 +2520,11 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                                 ),
                               ),
                               GestureDetector(
-                                onTap: () =>
-                                    setState(() => fotoComprovante = null),
+                                onTap: loteFechado
+                                    ? null
+                                    : () => setState(
+                                        () => fotoComprovante = null,
+                                      ),
                                 child: const Icon(
                                   Icons.close_rounded,
                                   color: Color(0xFFB0BEC5),
@@ -2508,24 +2534,30 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                             ],
                           )
                         : Row(
-                            children: const [
+                            children: [
                               Icon(
                                 Icons.camera_alt_rounded,
-                                color: Color(0xFF90A4AE),
+                                color: loteFechado
+                                    ? Colors.grey.shade300
+                                    : const Color(0xFF90A4AE),
                                 size: 20,
                               ),
-                              SizedBox(width: 10),
+                              const SizedBox(width: 10),
                               Text(
                                 'Tirar foto (opcional)',
                                 style: TextStyle(
                                   fontSize: 14,
-                                  color: Color(0xFF90A4AE),
+                                  color: loteFechado
+                                      ? Colors.grey.shade300
+                                      : const Color(0xFF90A4AE),
                                 ),
                               ),
-                              Spacer(),
+                              const Spacer(),
                               Icon(
                                 Icons.chevron_right_rounded,
-                                color: Color(0xFFCFD8DC),
+                                color: loteFechado
+                                    ? Colors.grey.shade200
+                                    : const Color(0xFFCFD8DC),
                                 size: 18,
                               ),
                             ],
@@ -2554,25 +2586,34 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                       horizontal: 14,
                       vertical: 2,
                     ),
-                    title: const Text(
+                    title: Text(
                       'Troca de medidor / Correção',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w500,
-                        color: Color(0xFF37474F),
+                        color: loteFechado
+                            ? Colors.grey
+                            : const Color(0xFF37474F),
                       ),
                     ),
-                    subtitle: const Text(
+                    subtitle: Text(
                       'Permite leitura menor que a anterior',
-                      style: TextStyle(fontSize: 12, color: Color(0xFF90A4AE)),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: loteFechado
+                            ? Colors.grey.shade400
+                            : const Color(0xFF90A4AE),
+                      ),
                     ),
                     value: houveTrocaOuCorrecao,
                     activeColor: Colors.red.shade700,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    onChanged: (v) =>
-                        setState(() => houveTrocaOuCorrecao = v ?? false),
+                    onChanged: loteFechado
+                        ? null
+                        : (v) =>
+                              setState(() => houveTrocaOuCorrecao = v ?? false),
                   ),
                 ),
 
@@ -2685,20 +2726,26 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                                 strokeWidth: 2,
                               ),
                             )
-                          : const Icon(
-                              Icons.check_rounded,
-                              color: Colors.white,
+                          : Icon(
+                              loteFechado ? Icons.lock : Icons.check_rounded,
+                              color: loteFechado
+                                  ? Colors.grey.shade500
+                                  : Colors.white,
                             ),
                       label: Text(
-                        salvando
+                        loteFechado
+                            ? 'MÊS BLOQUEADO'
+                            : salvando
                             ? 'A GUARDAR...'
                             : (modoEdicao
                                   ? 'CONFIRMAR CORREÇÃO'
                                   : 'GUARDAR E AVANÇAR'),
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.bold,
-                          color: Colors.white,
+                          color: loteFechado
+                              ? Colors.grey.shade500
+                              : Colors.white,
                         ),
                       ),
                       style: ElevatedButton.styleFrom(
@@ -3270,61 +3317,138 @@ class TelaAdminDashboard extends StatelessWidget {
             ),
           ),
 
-          // DASHBOARD DE PROGRESSO OPERACIONAL
+          // --- BARRA DE PROGRESSO ESPECÍFICA DA ADMINISTRADORA ---
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: const [
-                        Text(
-                          'Progresso das Leituras (Mês)',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF1A1A2E),
-                          ),
+              child: FutureBuilder<Map<String, dynamic>>(
+                future: () async {
+                  int totalApartamentos = 0;
+                  int leiturasConcluidas = 0;
+
+                  DateTime agora = DateTime.now();
+                  String mesAnoFiltro = "${agora.month}_${agora.year}";
+
+                  // Busca apenas os prédios DESTA administradora
+                  var prediosSnapshot = await FirebaseFirestore.instance
+                      .collection('predios')
+                      .where('id_administradora', isEqualTo: idAdministradora)
+                      .get();
+
+                  for (var doc in prediosSnapshot.docs) {
+                    var dados = doc.data();
+                    if (dados['apartamentos'] != null) {
+                      if (dados['apartamentos'] is List) {
+                        totalApartamentos +=
+                            (dados['apartamentos'] as List).length;
+                      } else if (dados['apartamentos'] is num) {
+                        totalApartamentos += (dados['apartamentos'] as num)
+                            .toInt();
+                      }
+                    }
+                  }
+
+                  // Busca as leituras feitas para ESTA administradora
+                  var leiturasSnapshot = await FirebaseFirestore.instance
+                      .collection('leituras')
+                      .where('id_administradora', isEqualTo: idAdministradora)
+                      .get();
+
+                  for (var doc in leiturasSnapshot.docs) {
+                    if (doc.id.endsWith(mesAnoFiltro)) {
+                      leiturasConcluidas++;
+                    }
+                  }
+
+                  double progresso = 0.0;
+                  if (totalApartamentos > 0) {
+                    progresso = leiturasConcluidas / totalApartamentos;
+                  }
+
+                  return {
+                    'total': totalApartamentos,
+                    'concluidas': leiturasConcluidas,
+                    'porcentagem': progresso > 1.0 ? 1.0 : progresso,
+                  };
+                }(),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return Container(
+                      height: 100,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: const Center(child: CircularProgressIndicator()),
+                    );
+                  }
+
+                  var dadosOperacao =
+                      snapshot.data ??
+                      {'total': 0, 'concluidas': 0, 'porcentagem': 0.0};
+                  double pctValor = dadosOperacao['porcentagem'] as double;
+                  int pctTexto = (pctValor * 100).toInt();
+
+                  return Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.05),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
                         ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'Progresso do Consumo Mensal',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF1A1A2E),
+                              ),
+                            ),
+                            Text(
+                              '$pctTexto%',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: pctTexto == 100
+                                    ? Colors.green.shade700
+                                    : Colors.blue.shade700,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        LinearProgressIndicator(
+                          value: pctValor,
+                          backgroundColor: Colors.grey.shade100,
+                          color: pctTexto == 100
+                              ? Colors.green.shade600
+                              : Colors.blue.shade600,
+                          minHeight: 8,
+                        ),
+                        const SizedBox(height: 8),
                         Text(
-                          '85%',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.blue,
+                          '${dadosOperacao['concluidas']} de ${dadosOperacao['total']} medidores lidos este mês.',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey,
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 10),
-                    LinearProgressIndicator(
-                      value: 0.85,
-                      backgroundColor: Colors.grey.shade100,
-                      color: Colors.blue.shade600,
-                      minHeight: 8,
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Auditoria: 3.400 de 4.000 medidores processados em campo.',
-                      style: TextStyle(fontSize: 12, color: Colors.grey),
-                    ),
-                  ],
-                ),
+                  );
+                },
               ),
             ),
           ),
@@ -3728,9 +3852,8 @@ class TelaAdminDashboard extends StatelessWidget {
 }
 
 // ============================================================================
-// TELAS EXTRAS: AUDITORIA, FECHAMENTO E CONFIGURAÇÕES DA MARCA
+// TELA 1: AUDITORIA (Revisão de anomalias com ações reais)
 // ============================================================================
-
 class TelaAuditoria extends StatelessWidget {
   final String idAdministradora;
   const TelaAuditoria({super.key, required this.idAdministradora});
@@ -3747,84 +3870,208 @@ class TelaAuditoria extends StatelessWidget {
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: StreamBuilder<QuerySnapshot>(
+        // Procura leituras que tenham foto anexada (alertas de limite ou correção manual)
         stream: FirebaseFirestore.instance
             .collection('leituras')
             .where('id_administradora', isEqualTo: idAdministradora)
             .where('tem_foto_anexada', isEqualTo: true)
             .snapshots(),
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting)
+          if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty)
+          }
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
             return const Center(
               child: Text(
                 'Nenhuma anomalia para revisar. ✅',
                 style: TextStyle(fontSize: 16, color: Colors.grey),
               ),
             );
+          }
 
-          var docs = snapshot.data!.docs;
+          // Filtramos em memória para tirar da lista os que já foram aprovados pelo gestor
+          var docsPendentes = snapshot.data!.docs.where((doc) {
+            var dados = doc.data() as Map<String, dynamic>;
+            return dados['status_auditoria'] != 'aprovado';
+          }).toList();
+
+          if (docsPendentes.isEmpty) {
+            return const Center(
+              child: Text(
+                'Todas as anomalias foram auditadas! 🎉',
+                style: TextStyle(fontSize: 16, color: Colors.grey),
+              ),
+            );
+          }
+
           return ListView.builder(
             padding: const EdgeInsets.all(16),
-            itemCount: docs.length,
+            itemCount: docsPendentes.length,
             itemBuilder: (context, index) {
-              var dados = docs[index].data() as Map<String, dynamic>;
+              var doc = docsPendentes[index];
+              var dados = doc.data() as Map<String, dynamic>;
+
               return Card(
-                elevation: 2,
-                margin: const EdgeInsets.only(bottom: 12),
+                elevation: 3,
+                margin: const EdgeInsets.only(bottom: 16),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Padding(
                   padding: const EdgeInsets.all(12),
-                  child: Row(
+                  child: Column(
                     children: [
-                      Container(
-                        width: 80,
-                        height: 80,
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade200,
-                          borderRadius: BorderRadius.circular(8),
-                          image: dados['url_foto'] != null
-                              ? DecorationImage(
-                                  image: NetworkImage(dados['url_foto']),
-                                  fit: BoxFit.cover,
-                                )
-                              : null,
-                        ),
-                        child: dados['url_foto'] == null
-                            ? const Icon(
-                                Icons.image_not_supported,
-                                color: Colors.grey,
-                              )
-                            : null,
+                      Row(
+                        children: [
+                          // Área da foto
+                          GestureDetector(
+                            onTap: () {
+                              // Futuro: Ao clicar na foto, ela abre em ecrã inteiro
+                              if (dados['url_foto'] == null) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Imagem ainda não sincronizada pelo leiturista.',
+                                    ),
+                                  ),
+                                );
+                              }
+                            },
+                            child: Container(
+                              width: 90,
+                              height: 90,
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade200,
+                                borderRadius: BorderRadius.circular(8),
+                                image: dados['url_foto'] != null
+                                    ? DecorationImage(
+                                        image: NetworkImage(dados['url_foto']),
+                                        fit: BoxFit.cover,
+                                      )
+                                    : null,
+                              ),
+                              child: dados['url_foto'] == null
+                                  ? const Icon(
+                                      Icons.hourglass_bottom_rounded,
+                                      color: Colors.grey,
+                                    )
+                                  : null,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          // Dados do apartamento
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '${dados['condominio']} - Apto ${dados['apartamento']}',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                                Text(
+                                  'Medidor: ${dados['medidor']}',
+                                  style: const TextStyle(color: Colors.grey),
+                                ),
+                                const SizedBox(height: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red.shade50,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    'Consumo: ${dados['consumo']?.toStringAsFixed(3)}',
+                                    style: TextStyle(
+                                      color: Colors.red.shade900,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '${dados['condominio']} - Apto ${dados['apartamento']}',
-                              style: const TextStyle(
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 8),
+                        child: Divider(),
+                      ),
+                      // 🔘 BOTÕES DE DECISÃO
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          // Botão Rejeitar
+                          OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.red.shade700,
+                              side: BorderSide(color: Colors.red.shade200),
+                            ),
+                            icon: const Icon(Icons.refresh_rounded, size: 18),
+                            label: const Text(
+                              'REFAZER',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            onPressed: () async {
+                              // Apaga a leitura, forçando o leiturista a refazer
+                              await FirebaseFirestore.instance
+                                  .collection('leituras')
+                                  .doc(doc.id)
+                                  .delete();
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Leitura rejeitada! O apartamento voltou para a lista de pendentes do leiturista.',
+                                    ),
+                                    backgroundColor: Colors.orange,
+                                  ),
+                                );
+                              }
+                            },
+                          ),
+                          // Botão Aprovar
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green.shade600,
+                              elevation: 0,
+                            ),
+                            icon: const Icon(
+                              Icons.check_circle_outline,
+                              size: 18,
+                              color: Colors.white,
+                            ),
+                            label: const Text(
+                              'APROVAR',
+                              style: TextStyle(
+                                color: Colors.white,
                                 fontWeight: FontWeight.bold,
-                                fontSize: 16,
                               ),
                             ),
-                            Text(
-                              'Medidor: ${dados['medidor']}',
-                              style: const TextStyle(color: Colors.grey),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Consumo Apurado: ${dados['consumo']?.toStringAsFixed(3)}',
-                              style: const TextStyle(
-                                color: Colors.red,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
+                            onPressed: () async {
+                              // Atualiza o documento adicionando a tag de aprovado
+                              await FirebaseFirestore.instance
+                                  .collection('leituras')
+                                  .doc(doc.id)
+                                  .update({'status_auditoria': 'aprovado'});
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Leitura validada e pronta para faturamento!',
+                                    ),
+                                    backgroundColor: Colors.green,
+                                  ),
+                                );
+                              }
+                            },
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -3874,6 +4121,10 @@ class TelaFechamentoLote extends StatelessWidget {
             );
           }
 
+          // Descobre o mês e ano atual (ex: "7_2026")
+          DateTime agora = DateTime.now();
+          String mesAtual = "${agora.month}_${agora.year}";
+
           return ListView.builder(
             padding: const EdgeInsets.all(16),
             itemCount: snapshot.data!.docs.length,
@@ -3881,15 +4132,24 @@ class TelaFechamentoLote extends StatelessWidget {
               var predio = snapshot.data!.docs[index];
               var dadosPredio = predio.data() as Map<String, dynamic>? ?? {};
 
-              // 👇 Usando o campo exato descoberto pelo nosso Raio-X
               String nomeDoPredio =
                   dadosPredio['nome_predio'] ?? 'Prédio Sem Nome';
+
+              // Verifica se o mês atual já está na lista de lotes fechados deste prédio
+              List<dynamic> lotesFechados = dadosPredio['lotes_fechados'] ?? [];
+              bool isLoteFechado = lotesFechados.contains(mesAtual);
 
               return Card(
                 elevation: 2,
                 margin: const EdgeInsets.only(bottom: 12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(
+                    color: isLoteFechado
+                        ? Colors.red.shade200
+                        : Colors.transparent,
+                    width: 1.5,
+                  ),
                 ),
                 child: ListTile(
                   contentPadding: const EdgeInsets.symmetric(
@@ -3899,12 +4159,16 @@ class TelaFechamentoLote extends StatelessWidget {
                   leading: Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: Colors.indigo.shade50,
+                      color: isLoteFechado
+                          ? Colors.red.shade50
+                          : Colors.indigo.shade50,
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Icon(
-                      Icons.domain_rounded,
-                      color: Colors.indigo.shade700,
+                      isLoteFechado ? Icons.lock_rounded : Icons.domain_rounded,
+                      color: isLoteFechado
+                          ? Colors.red.shade700
+                          : Colors.indigo.shade700,
                     ),
                   ),
                   title: Text(
@@ -3914,43 +4178,115 @@ class TelaFechamentoLote extends StatelessWidget {
                       fontSize: 16,
                     ),
                   ),
-                  subtitle: const Padding(
-                    padding: EdgeInsets.only(top: 4),
+                  subtitle: Padding(
+                    padding: const EdgeInsets.only(top: 4),
                     child: Text(
-                      'Bloquear edições de leitura neste mês.',
-                      style: TextStyle(fontSize: 13),
+                      isLoteFechado
+                          ? 'O lote de leitura deste mês já está encerrado.'
+                          : 'Bloquear edições de leitura neste mês.',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: isLoteFechado
+                            ? Colors.red.shade600
+                            : Colors.grey.shade700,
+                        fontWeight: isLoteFechado
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                      ),
                     ),
                   ),
                   trailing: ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.indigo.shade600,
+                      backgroundColor: isLoteFechado
+                          ? Colors.grey.shade300
+                          : Colors.indigo.shade600,
+                      foregroundColor: isLoteFechado
+                          ? Colors.grey.shade600
+                          : Colors.white,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
+                      elevation: isLoteFechado ? 0 : 2,
                     ),
-                    icon: const Icon(
-                      Icons.lock_outline_rounded,
+                    icon: Icon(
+                      isLoteFechado ? Icons.lock : Icons.lock_outline_rounded,
                       size: 16,
-                      color: Colors.white,
                     ),
-                    label: const Text(
-                      'FECHAR',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                      ),
+                    label: Text(
+                      isLoteFechado ? 'FECHADO' : 'FECHAR',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
-                    onPressed: () {
-                      // Aqui entrará futuramente a lógica de atualizar o status do mês no Firebase
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Lote bloqueado com sucesso! Nenhuma leitura será alterada.',
-                          ),
-                          backgroundColor: Colors.green,
-                        ),
-                      );
-                    },
+                    onPressed: isLoteFechado
+                        ? null
+                        : () async {
+                            // 🔥 LÓGICA REAL DE BLOQUEIO NO FIREBASE
+                            // Confirmação por segurança para não fechar sem querer
+                            bool confirmacao =
+                                await showDialog(
+                                  context: context,
+                                  builder: (ctx) => AlertDialog(
+                                    title: const Text('Confirmar Fechamento'),
+                                    content: Text(
+                                      'Tem certeza que deseja fechar o lote de $nomeDoPredio?\n\nOs leituristas não poderão mais enviar ou editar leituras neste mês.',
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(ctx, false),
+                                        child: const Text('CANCELAR'),
+                                      ),
+                                      ElevatedButton(
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.red,
+                                        ),
+                                        onPressed: () =>
+                                            Navigator.pop(ctx, true),
+                                        child: const Text(
+                                          'SIM, FECHAR LOTE',
+                                          style: TextStyle(color: Colors.white),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ) ??
+                                false;
+
+                            if (confirmacao) {
+                              try {
+                                // Adiciona o mês atual à array de lotes fechados no Firebase
+                                await FirebaseFirestore.instance
+                                    .collection('predios')
+                                    .doc(predio.id)
+                                    .set({
+                                      'lotes_fechados': FieldValue.arrayUnion([
+                                        mesAtual,
+                                      ]),
+                                    }, SetOptions(merge: true));
+
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Lote bloqueado com sucesso! Nenhuma leitura será alterada.',
+                                      ),
+                                      backgroundColor: Colors.green,
+                                    ),
+                                  );
+                                }
+                              } catch (e) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        'Erro ao bloquear lote: $e',
+                                      ),
+                                      backgroundColor: Colors.red,
+                                    ),
+                                  );
+                                }
+                              }
+                            }
+                          },
                   ),
                 ),
               );
@@ -3962,9 +4298,124 @@ class TelaFechamentoLote extends StatelessWidget {
   }
 }
 
-class TelaConfiguracoesMarca extends StatelessWidget {
+// ============================================================================
+// TELA 3: CONFIGURAÇÕES MARCA (MOTOR REAL DE UPLOAD E GRAVAÇÃO)
+// ============================================================================
+
+class TelaConfiguracoesMarca extends StatefulWidget {
   final String idAdministradora;
   const TelaConfiguracoesMarca({super.key, required this.idAdministradora});
+
+  @override
+  State<TelaConfiguracoesMarca> createState() => _TelaConfiguracoesMarcaState();
+}
+
+class _TelaConfiguracoesMarcaState extends State<TelaConfiguracoesMarca> {
+  final TextEditingController _emailCtrl = TextEditingController();
+  final TextEditingController _whatsCtrl = TextEditingController();
+
+  bool _isLoading = true;
+  bool _isSaving = false;
+  String? _urlLogoAtual;
+  io.File? _novaImagem;
+
+  @override
+  void initState() {
+    super.initState();
+    _carregarDadosAtuais();
+  }
+
+  // Puxa os dados que já existem na nuvem para preencher a tela
+  Future<void> _carregarDadosAtuais() async {
+    try {
+      var doc = await FirebaseFirestore.instance
+          .collection('administradoras')
+          .doc(widget.idAdministradora)
+          .get();
+      if (doc.exists) {
+        var dados = doc.data() as Map<String, dynamic>;
+        setState(() {
+          _emailCtrl.text = dados['email_suporte'] ?? '';
+          _whatsCtrl.text = dados['whatsapp_suporte'] ?? '';
+          _urlLogoAtual = dados['url_logo'];
+        });
+      }
+    } catch (e) {
+      debugPrint("Erro ao carregar marca: $e");
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  // Abre a galeria do telemóvel para escolher a logo
+  Future<void> _escolherImagem() async {
+    // Requer o pacote image_picker no pubspec.yaml
+    /* Descomente este bloco assim que o pacote estiver instalado
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+    
+    if (pickedFile != null) {
+      setState(() {
+        _novaImagem = io.File(pickedFile.path);
+      });
+    }
+    */
+
+    // Alerta provisório caso o pacote ainda não esteja ativo
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Pacote image_picker necessário para abrir a galeria!'),
+      ),
+    );
+  }
+
+  // Salva tudo no Firebase
+  Future<void> _salvarAlteracoes() async {
+    setState(() => _isSaving = true);
+    try {
+      String? urlParaSalvar = _urlLogoAtual;
+
+      // Se o utilizador escolheu uma foto nova, fazemos o upload para o Storage primeiro
+      if (_novaImagem != null) {
+        final ref = FirebaseStorage.instance.ref().child(
+          'logos_administradoras/logo_${widget.idAdministradora}.jpg',
+        );
+        await ref.putFile(_novaImagem!);
+        urlParaSalvar = await ref.getDownloadURL();
+      }
+
+      // Atualiza o documento da Administradora com as novas configurações
+      await FirebaseFirestore.instance
+          .collection('administradoras')
+          .doc(widget.idAdministradora)
+          .set({
+            'email_suporte': _emailCtrl.text.trim(),
+            'whatsapp_suporte': _whatsCtrl.text.trim(),
+            'url_logo': urlParaSalvar,
+          }, SetOptions(merge: true));
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Configurações de marca salvas com sucesso!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao salvar: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      setState(() => _isSaving = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -3977,111 +4428,147 @@ class TelaConfiguracoesMarca extends StatelessWidget {
         backgroundColor: Colors.teal.shade700,
         iconTheme: const IconThemeData(color: Colors.white),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.amber.shade50,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.amber.shade300),
-              ),
-              child: Row(
-                children: const [
-                  Icon(
-                    Icons.workspace_premium_rounded,
-                    color: Colors.amber,
-                    size: 30,
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.amber.shade300),
+                    ),
+                    child: Row(
+                      children: const [
+                        Icon(
+                          Icons.workspace_premium_rounded,
+                          color: Colors.amber,
+                          size: 30,
+                        ),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Plano White-Label. As configurações abaixo aparecerão em todos os PDFs oficiais.',
+                            style: TextStyle(color: Colors.black87),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Plano White-Label. As configurações abaixo aparecerão em todos os PDFs oficiais gerados.',
-                      style: TextStyle(color: Colors.black87),
+                  const SizedBox(height: 30),
+
+                  const Text(
+                    'Logótipo Oficial',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  const SizedBox(height: 10),
+                  GestureDetector(
+                    onTap: _escolherImagem,
+                    child: Container(
+                      height: 120,
+                      width: 200,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade200,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: Colors.grey.shade300,
+                          width: 1.0,
+                        ),
+                        image: _novaImagem != null
+                            ? DecorationImage(
+                                image: FileImage(_novaImagem!),
+                                fit: BoxFit.contain,
+                              )
+                            : (_urlLogoAtual != null
+                                  ? DecorationImage(
+                                      image: NetworkImage(_urlLogoAtual!),
+                                      fit: BoxFit.contain,
+                                    )
+                                  : null),
+                      ),
+                      child: (_novaImagem == null && _urlLogoAtual == null)
+                          ? const Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.upload_file_rounded,
+                                  color: Colors.grey,
+                                  size: 30,
+                                ),
+                                SizedBox(height: 8),
+                                Text(
+                                  'Enviar imagem',
+                                  style: TextStyle(color: Colors.grey),
+                                ),
+                              ],
+                            )
+                          : null,
+                    ),
+                  ),
+
+                  const SizedBox(height: 30),
+                  const Text(
+                    'Contactos do Relatório',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  const SizedBox(height: 15),
+                  TextFormField(
+                    controller: _emailCtrl,
+                    keyboardType: TextInputType.emailAddress,
+                    decoration: const InputDecoration(
+                      labelText: 'E-mail de Suporte',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.email),
+                    ),
+                  ),
+                  const SizedBox(height: 15),
+                  TextFormField(
+                    controller: _whatsCtrl,
+                    keyboardType: TextInputType.phone,
+                    decoration: const InputDecoration(
+                      labelText: 'WhatsApp de Suporte',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.phone),
+                    ),
+                  ),
+
+                  const SizedBox(height: 40),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.teal.shade700,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                      onPressed: _isSaving ? null : _salvarAlteracoes,
+                      child: _isSaving
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : const Text(
+                              'SALVAR ALTERAÇÕES',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                     ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 30),
-            const Text(
-              'Logótipo Oficial',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-            ),
-            const SizedBox(height: 10),
-            InkWell(
-              onTap: () {},
-              child: Container(
-                height: 120,
-                width: 200,
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade200,
-                  borderRadius: BorderRadius.circular(12),
-                  // 🔥 Correção do erro da borda (BorderStyle foi removido para não dar conflito com o excel.dart)
-                  border: Border.all(color: Colors.grey.shade300, width: 1.0),
-                ),
-                child: const Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.upload_file_rounded,
-                      color: Colors.grey,
-                      size: 30,
-                    ),
-                    SizedBox(height: 8),
-                    Text('Enviar imagem', style: TextStyle(color: Colors.grey)),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 30),
-            const Text(
-              'Contactos do Relatório',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-            ),
-            const SizedBox(height: 15),
-            TextFormField(
-              decoration: const InputDecoration(
-                labelText: 'E-mail de Suporte',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.email),
-              ),
-            ),
-            const SizedBox(height: 15),
-            TextFormField(
-              decoration: const InputDecoration(
-                labelText: 'WhatsApp de Suporte',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.phone),
-              ),
-            ),
-            const SizedBox(height: 30),
-            SizedBox(
-              width: double.infinity,
-              height: 50,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.teal.shade700,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-                onPressed: () => Navigator.pop(context),
-                child: const Text(
-                  'SALVAR ALTERAÇÕES',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -4281,6 +4768,7 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
   }
 
   @override
+  @override
   Widget build(BuildContext context) {
     const Color azulEscuro = Color(0xFF0A192F);
     const Color azul = Color(0xFF0D47A1);
@@ -4389,6 +4877,139 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
                   ),
                 ),
               ],
+            ),
+          ),
+
+          // --- BARRA DE PROGRESSO GLOBAL (OPERAÇÃO TOTAL MC PRESTADORA) ---
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+              child: FutureBuilder<Map<String, dynamic>>(
+                future: () async {
+                  int totalApartamentos = 0;
+                  int leiturasConcluidas = 0;
+
+                  // Descobre o mês e ano atual
+                  DateTime agora = DateTime.now();
+                  String mesAnoFiltro = "${agora.month}_${agora.year}";
+
+                  // Busca TODOS os prédios do sistema
+                  var prediosSnapshot = await FirebaseFirestore.instance
+                      .collection('predios')
+                      .get();
+
+                  for (var doc in prediosSnapshot.docs) {
+                    var dados = doc.data();
+                    if (dados['apartamentos'] != null) {
+                      if (dados['apartamentos'] is List) {
+                        totalApartamentos +=
+                            (dados['apartamentos'] as List).length;
+                      } else if (dados['apartamentos'] is num) {
+                        totalApartamentos += (dados['apartamentos'] as num)
+                            .toInt();
+                      }
+                    }
+                  }
+
+                  // Busca TODAS as leituras do sistema
+                  var leiturasSnapshot = await FirebaseFirestore.instance
+                      .collection('leituras')
+                      .get();
+
+                  for (var doc in leiturasSnapshot.docs) {
+                    if (doc.id.endsWith(mesAnoFiltro)) {
+                      leiturasConcluidas++;
+                    }
+                  }
+
+                  double progresso = 0.0;
+                  if (totalApartamentos > 0) {
+                    progresso = leiturasConcluidas / totalApartamentos;
+                  }
+
+                  return {
+                    'total': totalApartamentos,
+                    'concluidas': leiturasConcluidas,
+                    'porcentagem': progresso > 1.0 ? 1.0 : progresso,
+                  };
+                }(),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return Container(
+                      height: 100,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: const Center(child: CircularProgressIndicator()),
+                    );
+                  }
+
+                  var dadosOperacao =
+                      snapshot.data ??
+                      {'total': 0, 'concluidas': 0, 'porcentagem': 0.0};
+                  double pctValor = dadosOperacao['porcentagem'] as double;
+                  int pctTexto = (pctValor * 100).toInt();
+
+                  return Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.05),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'Progresso Global da Operação',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF1A1A2E),
+                              ),
+                            ),
+                            Text(
+                              '$pctTexto%',
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.blue,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        LinearProgressIndicator(
+                          value: pctValor,
+                          backgroundColor: Colors.grey.shade200,
+                          color: pctTexto == 100
+                              ? Colors.green.shade600
+                              : Colors.blue.shade600,
+                          minHeight: 8,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '${dadosOperacao['concluidas']} de ${dadosOperacao['total']} medidores lidos neste mês.',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
             ),
           ),
 
@@ -4667,7 +5288,7 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
                                       Icons.paste_rounded,
                                       size: 18,
                                       color: Colors.white,
-                                    ), // Ícone mudou
+                                    ),
                                     label: const Text(
                                       'Importar em Massa',
                                       style: TextStyle(
@@ -4685,9 +5306,8 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
                                       ),
                                       elevation: 0,
                                     ),
-                                    onPressed: () => _abrirDialogImportacao(
-                                      doc.id,
-                                    ), // 🔥 A NOVA FUNÇÃO AQUI!
+                                    onPressed: () =>
+                                        _abrirDialogImportacao(doc.id),
                                   ),
                                 ),
                               ],
