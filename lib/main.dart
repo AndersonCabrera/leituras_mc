@@ -4582,183 +4582,15 @@ class TelaSuperAdminDashboard extends StatefulWidget {
 }
 
 class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
-  // 🟢 FUNÇÃO MÁGICA: IMPORTAÇÃO DO EXCEL
-  // 🟢 NOVA ESTRATÉGIA: IMPORTAÇÃO POR COPIAR E COLAR (SMART PASTE)
+  // 🟢 NAVEGAÇÃO CORRETA PARA A NOVA TELA DE IMPORTAÇÃO
   void _abrirDialogImportacao(String idAdministradora) {
-    final TextEditingController _pasteController = TextEditingController();
-    bool processando = false;
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setStateDialog) {
-            return AlertDialog(
-              title: Row(
-                children: const [
-                  Icon(Icons.paste_rounded, color: Color(0xFF0D47A1)),
-                  SizedBox(width: 10),
-                  Text(
-                    'Importação Rápida (Smart Paste)',
-                    style: TextStyle(fontSize: 18),
-                  ),
-                ],
-              ),
-              content: SizedBox(
-                width: 500,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Copie os dados diretamente do seu Excel e cole na caixa abaixo.\n'
-                      'Ordem das colunas: Condomínio | Apto | Medidor',
-                      style: TextStyle(fontSize: 13, color: Colors.grey),
-                    ),
-                    const SizedBox(height: 15),
-                    TextField(
-                      controller: _pasteController,
-                      maxLines: 8,
-                      decoration: InputDecoration(
-                        hintText:
-                            "Exemplo:\nEdifício Sol\t101\tÁgua\nEdifício Sol\t102\tGás",
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        filled: true,
-                        fillColor: Colors.grey.shade50,
-                      ),
-                    ),
-                    if (processando)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 15),
-                        child: Center(child: CircularProgressIndicator()),
-                      ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: processando ? null : () => Navigator.pop(context),
-                  child: const Text(
-                    'CANCELAR',
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                ),
-                ElevatedButton(
-                  onPressed: processando
-                      ? null
-                      : () async {
-                          if (_pasteController.text.trim().isEmpty) return;
-                          setStateDialog(() => processando = true);
-
-                          await _processarTextoColado(
-                            _pasteController.text,
-                            idAdministradora,
-                          );
-
-                          if (context.mounted) Navigator.pop(context);
-                        },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF0D47A1),
-                  ),
-                  child: const Text(
-                    'IMPORTAR DADOS',
-                    style: TextStyle(color: Colors.white),
-                  ),
-                ),
-              ],
-            );
-          },
-        );
-      },
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) =>
+            TelaImportacaoMassa(idAdministradora: idAdministradora),
+      ),
     );
-  }
-
-  // O Motor que lê o texto colado e injeta no Firebase
-  Future<void> _processarTextoColado(
-    String textoBruto,
-    String idAdministradora,
-  ) async {
-    try {
-      // O Excel separa as linhas por "Enter" (\n) e as colunas por "Tab" (\t)
-      List<String> linhas = textoBruto.trim().split('\n');
-
-      WriteBatch batch = FirebaseFirestore.instance.batch();
-      int contador = 0;
-      int totalImportados = 0;
-
-      for (String linha in linhas) {
-        if (linha.trim().isEmpty) continue;
-
-        List<String> colunas = linha.split('\t');
-
-        // Exige pelo menos Condominio e Apartamento (Medidor é bônus)
-        if (colunas.length < 2) continue;
-
-        String condominio = colunas[0].trim();
-        String apartamento = colunas[1].trim();
-        String medidor = colunas.length > 2 && colunas[2].trim().isNotEmpty
-            ? colunas[2].trim()
-            : 'Água';
-
-        // Evita cabeçalhos colados por acidente
-        if (condominio.toLowerCase() == 'condominio' ||
-            apartamento.toLowerCase() == 'apartamento')
-          continue;
-
-        var docRef = FirebaseFirestore.instance.collection('leituras').doc();
-        batch.set(docRef, {
-          'id_administradora': idAdministradora,
-          'condominio': condominio,
-          'apartamento': apartamento,
-          'medidor': medidor,
-          'leitura_anterior': 0.0,
-          'leitura_atual': 0.0,
-          'consumo': 0.0,
-          'teve_consumo': false,
-          'tem_foto_anexada': false,
-          'correcao_manual': true,
-          'data_hora': FieldValue.serverTimestamp(),
-          'importacao_lote': true,
-        });
-
-        contador++;
-        totalImportados++;
-
-        // Limite do Firebase Batch é 500
-        if (contador >= 450) {
-          await batch.commit();
-          batch = FirebaseFirestore.instance.batch();
-          contador = 0;
-        }
-      }
-
-      if (contador > 0) {
-        await batch.commit();
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '✅ $totalImportados medidores importados com sucesso!',
-            ),
-            backgroundColor: Colors.green.shade700,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao processar dados: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
   }
 
   void _mostrarErro(String msg) {
@@ -4767,7 +4599,6 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
     ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
   }
 
-  @override
   @override
   Widget build(BuildContext context) {
     const Color azulEscuro = Color(0xFF0A192F);
@@ -4796,7 +4627,6 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
               if (context.mounted) {
                 Navigator.pushReplacement(
                   context,
-                  // Nota: Assegure-se que EcraLogin está importado no topo do seu ficheiro original
                   MaterialPageRoute(builder: (context) => const EcraLogin()),
                 );
               }
@@ -4889,11 +4719,9 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
                   int totalApartamentos = 0;
                   int leiturasConcluidas = 0;
 
-                  // Descobre o mês e ano atual
                   DateTime agora = DateTime.now();
                   String mesAnoFiltro = "${agora.month}_${agora.year}";
 
-                  // Busca TODOS os prédios do sistema
                   var prediosSnapshot = await FirebaseFirestore.instance
                       .collection('predios')
                       .get();
@@ -4911,7 +4739,6 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
                     }
                   }
 
-                  // Busca TODAS as leituras do sistema
                   var leiturasSnapshot = await FirebaseFirestore.instance
                       .collection('leituras')
                       .get();
@@ -5034,7 +4861,6 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          // Nota: Assegure-se que TelaCadastroAdministradora está importada
                           builder: (context) =>
                               const TelaCadastroAdministradora(),
                         ),
@@ -5240,7 +5066,6 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
                             padding: const EdgeInsets.all(16),
                             child: Row(
                               children: [
-                                // BOTÃO DE CRIAR ACESSO ADMIN
                                 Expanded(
                                   child: OutlinedButton.icon(
                                     icon: const Icon(
@@ -5281,7 +5106,7 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
                                 ),
                                 const SizedBox(width: 8),
 
-                                // BOTÃO ATUALIZADO PARA IMPORTAÇÃO EM MASSA
+                                // BOTÃO DE IMPORTAÇÃO EM MASSA
                                 Expanded(
                                   child: ElevatedButton.icon(
                                     icon: const Icon(
@@ -5327,7 +5152,6 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
     );
   }
 
-  // Widget Interno: Cartão de Estatísticas do Super Admin
   Widget _kpiCard(
     String titulo,
     IconData icon,
@@ -5834,7 +5658,7 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
     BuildContext context,
     List<QueryDocumentSnapshot> leituras,
   ) async {
-    // 🛑 FEEDBACK VISUAL IMEDIATO: Informa o usuário no ato do clique
+    // 🛑 FEEDBACK VISUAL IMEDIATO
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -5852,7 +5676,6 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
     String nomeContato = 'Anderson';
 
     try {
-      // 🔍 BUSCA COM TIMEOUT LIMITADO: Não trava a UI caso a rede falhe
       final docAdmin = await FirebaseFirestore.instance
           .collection('administradoras')
           .doc(widget.idAdministradora)
@@ -5873,7 +5696,7 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
 
     String foneNumeros = telefoneBruto.replaceAll(RegExp(r'[^0-9]'), '');
     if (!foneNumeros.startsWith('55') && foneNumeros.isNotEmpty) {
-      foneNumeros = '55' + foneNumeros;
+      foneNumeros = '55$foneNumeros';
     }
     if (foneNumeros.isEmpty) foneNumeros = '5551981285818';
 
@@ -5912,6 +5735,7 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
       numberFormat: NumFormat.custom(formatCode: '0.000'),
     );
 
+    // 💡 CABEÇALHO ATUALIZADO COM AUDITORIA
     List<String> cabecalho = [
       'Data/Hora',
       'Apartamento',
@@ -5919,7 +5743,9 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
       'L. Anterior',
       'L. Atual',
       'Consumo',
-      'Link da Foto',
+      'Correção Manual',
+      'Status Auditoria',
+      'Evidência Visual (Foto)',
     ];
     sheetObject.appendRow(
       cabecalho.map((titulo) => TextCellValue(titulo)).toList(),
@@ -5949,6 +5775,10 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
       double atual = (dados['leitura_atual'] ?? 0).toDouble();
       double cons = (dados['consumo'] ?? 0).toDouble();
       String linkFoto = dados['url_foto'] ?? '';
+      bool correcao = dados['correcao_manual'] ?? false;
+      String auditoria =
+          dados['status_auditoria'] ??
+          (dados['tem_foto_anexada'] == true ? 'Aguardando Revisão' : 'Normal');
 
       sheetObject.appendRow([
         TextCellValue(dataFormatada),
@@ -5957,7 +5787,11 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
         DoubleCellValue(ant),
         DoubleCellValue(atual),
         DoubleCellValue(cons),
-        TextCellValue(linkFoto.isEmpty ? 'Sem foto' : linkFoto),
+        TextCellValue(correcao ? 'Sim' : 'Não'),
+        TextCellValue(auditoria),
+        TextCellValue(
+          linkFoto.isEmpty ? 'Não exigida' : linkFoto,
+        ), // Vai ser sobreposto pelo Link
       ]);
 
       sheetObject
@@ -5979,16 +5813,18 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
               .cellStyle =
           estiloNumero;
 
+      // 💡 HYPERLINK SEGURO PARA A FOTO NO EXCEL
       if (linkFoto.isNotEmpty) {
         var celulaLink = sheetObject.cell(
-          CellIndex.indexByColumnRow(columnIndex: 6, rowIndex: rowIndex),
+          CellIndex.indexByColumnRow(columnIndex: 8, rowIndex: rowIndex),
         );
         celulaLink.value = FormulaCellValue(
-          '=HYPERLINK("$linkFoto", "VER FOTO")',
+          '=HYPERLINK("$linkFoto", "VER FOTO DE EVIDÊNCIA")',
         );
         celulaLink.cellStyle = CellStyle(
           fontColorHex: ExcelColor.fromHexString('#0000FF'),
           underline: Underline.Single,
+          bold: true,
         );
       }
     }
@@ -6012,7 +5848,7 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
 
     sheetObject.appendRow([
       TextCellValue(
-        'Esta leitura foi realizada pelo sistema oficial de medição da empresa $nomeEmpresa.',
+        'Esta leitura foi realizada e auditada pelo sistema oficial de medição da empresa $nomeEmpresa.',
       ),
     ]);
     sheetObject
@@ -6024,7 +5860,6 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
             )
             .cellStyle =
         estiloPublicidade;
-
     sheetObject.appendRow([TextCellValue('CNPJ do Emissor: $cnpjEmpresa')]);
     sheetObject.appendRow([
       TextCellValue('Para contratar serviços ou obter informações de suporte:'),
@@ -6033,7 +5868,7 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
     int linhaEmail = sheetObject.maxRows;
     sheetObject.appendRow([
       FormulaCellValue(
-        '=HYPERLINK("mailto:$emailEmpresa", "✉️ E-mail: $emailEmpresa (Clique para enviar)")',
+        '=HYPERLINK("mailto:$emailEmpresa", "✉️ E-mail: $emailEmpresa")',
       ),
     ]);
     sheetObject
@@ -6046,7 +5881,7 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
     int linhaWhats = sheetObject.maxRows;
     sheetObject.appendRow([
       FormulaCellValue(
-        '=HYPERLINK("https://wa.me/$foneNumeros", "💬 WhatsApp: $telefoneBruto (Clique para abrir a conversa)")',
+        '=HYPERLINK("https://wa.me/$foneNumeros", "💬 WhatsApp: $telefoneBruto")',
       ),
     ]);
     sheetObject
@@ -6056,7 +5891,7 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
             .cellStyle =
         estiloLinkDireto;
 
-    sheetObject.appendRow([TextCellValue('Responsável: $nomeContato')]);
+    sheetObject.appendRow([TextCellValue('Responsável Técnico: $nomeContato')]);
     sheetObject
             .cell(
               CellIndex.indexByColumnRow(
@@ -6112,11 +5947,10 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
     BuildContext context,
     List<QueryDocumentSnapshot> leituras,
   ) async {
-    // 🛑 FEEDBACK VISUAL IMEDIATO
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Gerando Relatório Oficial PDF...'),
+          content: Text('Construindo Laudo Técnico em PDF...'),
           backgroundColor: Color(0xFF0D47A1),
           duration: Duration(seconds: 3),
         ),
@@ -6128,9 +5962,9 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
     String emailEmpresa = 'anderson.mcservicos@gmail.com';
     String telefoneBruto = '(51) 98128-5818';
     String nomeContato = 'Anderson';
+    String? urlLogoFirebase;
 
     try {
-      // 🔍 BUSCA COM TIMEOUT
       final docAdmin = await FirebaseFirestore.instance
           .collection('administradoras')
           .doc(widget.idAdministradora)
@@ -6144,28 +5978,39 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
         emailEmpresa = dadosAdmin['email'] ?? emailEmpresa;
         telefoneBruto = dadosAdmin['telefone'] ?? telefoneBruto;
         nomeContato = dadosAdmin['nome_contato'] ?? nomeContato;
+        urlLogoFirebase =
+            dadosAdmin['url_logo']; // 💡 PUXA A LOGO WHITE-LABEL DO BANCO
       }
     } catch (e) {
-      debugPrint('SaaS White-Label fallback usado: $e');
+      debugPrint('Fallback White-Label: $e');
     }
 
     String foneNumeros = telefoneBruto.replaceAll(RegExp(r'[^0-9]'), '');
-    if (!foneNumeros.startsWith('55') && foneNumeros.isNotEmpty) {
-      foneNumeros = '55' + foneNumeros;
-    }
-    if (foneNumeros.isEmpty) foneNumeros = '5551981285818';
+    if (!foneNumeros.startsWith('55') && foneNumeros.isNotEmpty)
+      foneNumeros = '55$foneNumeros';
 
-    pw.MemoryImage? logoImage;
-    try {
-      final ByteData bytes = await rootBundle.load('assets/logo.png');
-      logoImage = pw.MemoryImage(bytes.buffer.asUint8List());
-    } catch (e) {
-      debugPrint('Aviso: Logo nativo ausente.');
+    pw.ImageProvider? logoImage;
+    if (urlLogoFirebase != null && urlLogoFirebase.isNotEmpty) {
+      try {
+        logoImage = await networkImage(
+          urlLogoFirebase,
+        ); // Usa a imagem do Firebase
+      } catch (e) {
+        debugPrint('Erro ao carregar logo do Firebase no PDF: $e');
+      }
+    } else {
+      try {
+        final ByteData bytes = await rootBundle.load('assets/logo.png');
+        logoImage = pw.MemoryImage(bytes.buffer.asUint8List());
+      } catch (e) {
+        debugPrint('Sem logo nativa.');
+      }
     }
 
     final pdf = pw.Document();
     List<pw.Widget> listaDeLeituras = [];
 
+    // 💡 CONSTRUÇÃO DOS CARTÕES DE LEITURA PARA O PDF
     for (var doc in leituras) {
       var dados = doc.data() as Map<String, dynamic>;
       String dataStr = '-';
@@ -6181,9 +6026,12 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
         try {
           imagemPdf = await networkImage(dados['url_foto']);
         } catch (e) {
-          debugPrint('Foto remota indisponível para o PDF.');
+          debugPrint('Foto de auditoria indisponível.');
         }
       }
+
+      bool isAprovado = dados['status_auditoria'] == 'aprovado';
+      bool temFoto = dados['tem_foto_anexada'] == true;
 
       listaDeLeituras.add(
         pw.Container(
@@ -6201,14 +6049,14 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
                     pw.Text(
-                      'Apto / Porta: ${dados['apartamento'] ?? '-'}',
+                      'Apto: ${dados['apartamento'] ?? '-'}',
                       style: pw.TextStyle(
                         fontSize: 18,
                         fontWeight: pw.FontWeight.bold,
                         color: PdfColors.blue900,
                       ),
                     ),
-                    pw.SizedBox(height: 8),
+                    pw.SizedBox(height: 5),
                     pw.Text('Medidor: ${dados['medidor'] ?? '-'}'),
                     pw.Text('Data da Leitura: $dataStr'),
                     pw.Text(
@@ -6219,13 +6067,28 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
                     ),
                     pw.SizedBox(height: 5),
                     pw.Text(
-                      'Consumo Apurado: ${dados['consumo']?.toStringAsFixed(3) ?? '-'}',
+                      'Consumo: ${dados['consumo']?.toStringAsFixed(3) ?? '-'}',
                       style: pw.TextStyle(
                         fontSize: 14,
                         fontWeight: pw.FontWeight.bold,
                         color: PdfColors.red700,
                       ),
                     ),
+                    if (temFoto) ...[
+                      pw.SizedBox(height: 5),
+                      pw.Text(
+                        isAprovado
+                            ? '✓ Leitura Auditada e Aprovada'
+                            : '⚠️ Aguardando Auditoria',
+                        style: pw.TextStyle(
+                          color: isAprovado
+                              ? PdfColors.green700
+                              : PdfColors.orange700,
+                          fontWeight: pw.FontWeight.bold,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -6243,7 +6106,7 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
                   alignment: pw.Alignment.center,
                   decoration: const pw.BoxDecoration(color: PdfColors.grey200),
                   child: pw.Text(
-                    'Sem foto',
+                    'Sem Evidência',
                     style: const pw.TextStyle(color: PdfColors.grey600),
                   ),
                 ),
@@ -6280,13 +6143,13 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
                       pw.Text(
                         nomeEmpresa.toUpperCase(),
                         style: pw.TextStyle(
-                          fontSize: 12,
+                          fontSize: 14,
                           fontWeight: pw.FontWeight.bold,
                           color: PdfColors.blue800,
                         ),
                       ),
                       pw.Text(
-                        "Relatório Oficial - ${widget.condominio}",
+                        "Relatório de leitura: ${widget.condominio}",
                         style: pw.TextStyle(
                           fontSize: 18,
                           fontWeight: pw.FontWeight.bold,
@@ -6303,7 +6166,12 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
                     ],
                   ),
                   if (logoImage != null)
-                    pw.Container(height: 50, child: pw.Image(logoImage)),
+                    pw.Container(
+                      height: 60,
+                      width: 120,
+                      alignment: pw.Alignment.centerRight,
+                      child: pw.Image(logoImage, fit: pw.BoxFit.contain),
+                    ),
                 ],
               ),
             ),
@@ -6318,7 +6186,7 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
                 crossAxisAlignment: pw.CrossAxisAlignment.center,
                 children: [
                   pw.Text(
-                    "Esta leitura foi realizada e auditada pelo sistema oficial de medição da empresa $nomeEmpresa.",
+                    "Leitura realizada e auditada pela $nomeEmpresa.",
                     style: pw.TextStyle(
                       fontSize: 10,
                       fontWeight: pw.FontWeight.bold,
@@ -6378,7 +6246,6 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
       ),
     );
 
-    // 💡 AS VARIÁVEIS DO ARQUIVO AGORA ESTÃO NO ESCOPO CORRETO E SEGURO
     String prefixo = _gerarPrefixoMedidores(leituras);
     DateTime agora = DateTime.now();
     String dataArquivo =
@@ -6387,12 +6254,15 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
         '${prefixo}${widget.condominio.replaceAll(' ', '_')}_$dataArquivo.pdf';
 
     try {
-      await Printing.sharePdf(bytes: await pdf.save(), filename: nomeFicheiro);
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => pdf.save(),
+        name: nomeFicheiro,
+      );
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erro ao compartilhar PDF: $e'),
+            content: Text('Erro ao imprimir PDF: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -7729,6 +7599,270 @@ class TelaListaEquipe extends StatelessWidget {
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
       ),
+    );
+  }
+}
+
+// ============================================================================
+// TELA DE IMPORTAÇÃO EM MASSA (EXCEL)
+// ============================================================================
+class TelaImportacaoMassa extends StatefulWidget {
+  final String idAdministradora;
+
+  const TelaImportacaoMassa({super.key, required this.idAdministradora});
+
+  @override
+  State<TelaImportacaoMassa> createState() => _TelaImportacaoMassaState();
+}
+
+class _TelaImportacaoMassaState extends State<TelaImportacaoMassa> {
+  final TextEditingController _nomePredioCtrl = TextEditingController();
+  final TextEditingController _enderecoCtrl = TextEditingController();
+  final TextEditingController _apartamentosCtrl = TextEditingController();
+
+  bool _temAgua = true;
+  bool _temGas = false;
+  bool _temEnergia = false;
+
+  bool _salvando = false;
+
+  Future<void> _processarImportacao() async {
+    if (_nomePredioCtrl.text.trim().isEmpty) {
+      _mostrarErro('Digite o nome do Prédio/Condomínio.');
+      return;
+    }
+    if (_apartamentosCtrl.text.trim().isEmpty) {
+      _mostrarErro('Cole a lista de apartamentos.');
+      return;
+    }
+    if (!_temAgua && !_temGas && !_temEnergia) {
+      _mostrarErro('Selecione pelo menos um tipo de medidor.');
+      return;
+    }
+
+    setState(() => _salvando = true);
+
+    try {
+      List<String> linhasPuras = _apartamentosCtrl.text.split('\n');
+      List<String> apartamentosLimpos = [];
+
+      for (String linha in linhasPuras) {
+        String limpa = linha.trim();
+        if (limpa.isNotEmpty &&
+            !limpa.toLowerCase().contains('apartamento') &&
+            !limpa.toLowerCase().contains('apto') &&
+            !limpa.toLowerCase().contains('unidade')) {
+          apartamentosLimpos.add(limpa);
+        }
+      }
+
+      apartamentosLimpos = apartamentosLimpos.toSet().toList();
+
+      if (apartamentosLimpos.isEmpty) {
+        _mostrarErro('Nenhum apartamento válido encontrado.');
+        setState(() => _salvando = false);
+        return;
+      }
+
+      List<String> medidores = [];
+      if (_temAgua) medidores.add('agua');
+      if (_temGas) medidores.add('gas');
+      if (_temEnergia) medidores.add('energia');
+
+      await FirebaseFirestore.instance.collection('predios').add({
+        'id_administradora': widget.idAdministradora,
+        'nome_predio': _nomePredioCtrl.text.trim().toUpperCase(),
+        'endereco': _enderecoCtrl.text.trim(),
+        'medidores': medidores,
+        'apartamentos': apartamentosLimpos,
+        'data_cadastro': FieldValue.serverTimestamp(),
+        'lotes_fechados': [],
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Sucesso! ${apartamentosLimpos.length} unidades importadas para ${_nomePredioCtrl.text.toUpperCase()}.',
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      _mostrarErro('Erro ao processar importação: $e');
+      setState(() => _salvando = false);
+    }
+  }
+
+  void _mostrarErro(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Importação em Massa',
+          style: TextStyle(color: Colors.white),
+        ),
+        backgroundColor: Colors.green.shade700,
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      body: _salvando
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 16),
+                  Text(
+                    'A processar e construir banco de dados...',
+                    style: TextStyle(color: Colors.grey.shade600),
+                  ),
+                ],
+              ),
+            )
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: const [
+                        Icon(Icons.info_outline, color: Colors.blue),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Copie a coluna com o número das unidades no seu Excel e cole na caixa abaixo.',
+                            style: TextStyle(color: Colors.blue),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  const Text(
+                    'DADOS DO PRÉDIO',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black54,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _nomePredioCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Nome do Condomínio (Ex: Edifício Solar)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _enderecoCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Endereço (Opcional)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+
+                  const SizedBox(height: 25),
+                  const Text(
+                    'MEDIDORES DO PRÉDIO',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black54,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: CheckboxListTile(
+                          title: const Text('Água'),
+                          value: _temAgua,
+                          onChanged: (v) =>
+                              setState(() => _temAgua = v ?? false),
+                        ),
+                      ),
+                      Expanded(
+                        child: CheckboxListTile(
+                          title: const Text('Gás'),
+                          value: _temGas,
+                          onChanged: (v) =>
+                              setState(() => _temGas = v ?? false),
+                        ),
+                      ),
+                      Expanded(
+                        child: CheckboxListTile(
+                          title: const Text('Energia'),
+                          value: _temEnergia,
+                          onChanged: (v) =>
+                              setState(() => _temEnergia = v ?? false),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 25),
+                  const Text(
+                    'COLAR UNIDADES (EXCEL)',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black54,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _apartamentosCtrl,
+                    maxLines: 10,
+                    decoration: const InputDecoration(
+                      hintText: 'Cole aqui...\n101\n102\n103\n201\n202...',
+                      border: OutlineInputBorder(),
+                      filled: true,
+                      fillColor: Colors.white,
+                    ),
+                  ),
+
+                  const SizedBox(height: 30),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green.shade700,
+                      ),
+                      icon: const Icon(
+                        Icons.check_circle_outline,
+                        color: Colors.white,
+                      ),
+                      label: const Text(
+                        'PROCESSAR IMPORTAÇÃO',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                      onPressed: _processarImportacao,
+                    ),
+                  ),
+                ],
+              ),
+            ),
     );
   }
 }
