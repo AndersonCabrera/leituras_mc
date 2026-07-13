@@ -1751,7 +1751,10 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
   Future<void> _tirarFotoManual() async {
     final foto = await _picker.pickImage(
       source: ImageSource.camera,
-      imageQuality: 40,
+      imageQuality: 60, // Aumentamos um pouco a qualidade...
+      maxWidth:
+          1024, // 👈 MAS REDUZIMOS O TAMANHO FÍSICO (De 4000px para 1024px)
+      maxHeight: 1024, // A foto passa de 3MB para ~100KB!
     );
     if (foto != null) setState(() => fotoComprovante = foto);
   }
@@ -1759,7 +1762,9 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
   Future<void> _abrirGaleria() async {
     final foto = await _picker.pickImage(
       source: ImageSource.gallery,
-      imageQuality: 40,
+      imageQuality: 60,
+      maxWidth: 1024,
+      maxHeight: 1024,
     );
     if (foto != null) setState(() => fotoComprovante = foto);
   }
@@ -1767,29 +1772,17 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
   Future<void> _lerComIA() async {
     final fotoOriginal = await _picker.pickImage(
       source: ImageSource.camera,
-      imageQuality: 90,
+      imageQuality: 85, // A IA precisa de qualidade para ler...
+      maxWidth: 1600, // ... mas não precisa de 12 Megapixels.
+      maxHeight: 1600,
     );
     if (fotoOriginal == null) return;
-
-    final fotoCortada = await ImageCropper().cropImage(
-      sourcePath: fotoOriginal.path,
-      uiSettings: [
-        AndroidUiSettings(
-          toolbarTitle: 'Foque nos números',
-          toolbarColor: _azul,
-          toolbarWidgetColor: Colors.white,
-          initAspectRatio: CropAspectRatioPreset.ratio7x5,
-          lockAspectRatio: false,
-          hideBottomControls: true,
-        ),
-      ],
-    );
-    if (fotoCortada == null) return;
 
     setState(() => processandoIA = true);
 
     try {
-      final bytes = await fotoCortada.readAsBytes();
+      // 🟢 CORREÇÃO: Usar a fotoOriginal diretamente
+      final bytes = await fotoOriginal.readAsBytes();
       final base64Image = base64Encode(bytes);
 
       if (AppConfig.cloudVisionApiKey.isEmpty) {
@@ -1847,7 +1840,8 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
       if (resultado != null) {
         setState(() {
           _leituraCtrl.text = resultado!;
-          fotoComprovante = XFile(fotoCortada.path);
+          // 🟢 CORREÇÃO: Passar a foto original como comprovante
+          fotoComprovante = fotoOriginal;
         });
         _calcularConsumo(resultado);
         _toast(
@@ -1871,9 +1865,11 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
     if (leituraAtual != null &&
         leituraAnterior != null &&
         !houveTrocaOuCorrecao) {
-      double limiteConsumoSeguro = 7.0;
+      // 🛡️ O Limite físico foi baixado para rigorosos 1.0 (m³ ou kWh)
+      double limiteConsumoSeguro = 1.0;
 
-      if (consumoCalculado! > limiteConsumoSeguro) {
+      // Se for maior ou IGUAL a 1.0, exige foto
+      if (consumoCalculado! >= limiteConsumoSeguro) {
         if (fotoComprovante == null) {
           String unidadeAtual = _unidadeMedidor(
             widget.medidorSelecionado ?? '',
@@ -1902,9 +1898,9 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                 ],
               ),
               content: Text(
-                'Alerta de Consumo Elevado!\n\n'
-                'O consumo calculado (${consumoCalculado!.toStringAsFixed(3).replaceAll('.', ',')} $unidadeAtual) ultrapassou o limite seguro de $limiteConsumoSeguro $unidadeAtual.\n\n'
-                'Para evitar erros de digitação e permitir auditoria posterior, tire uma foto do visor do medidor.',
+                'Alerta de Consumo!\n\n'
+                'O consumo calculado (${consumoCalculado!.toStringAsFixed(3).replaceAll('.', ',')} $unidadeAtual) atingiu ou ultrapassou a marca de $limiteConsumoSeguro $unidadeAtual.\n\n'
+                'Tire uma foto do visor do medidor para comprovar a leitura ao síndico.',
                 style: const TextStyle(fontSize: 15),
               ),
               actions: [
