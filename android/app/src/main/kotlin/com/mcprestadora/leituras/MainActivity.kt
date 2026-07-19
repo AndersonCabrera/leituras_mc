@@ -1,4 +1,4 @@
-package com.example.leituras_mc
+package com.mcprestadora.leituras
 
 import io.flutter.embedding.android.FlutterActivity
 
