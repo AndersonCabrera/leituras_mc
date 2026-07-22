@@ -1,14 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 import 'firebase_options.dart';
 import 'screens/auth/tela_login.dart';
-import 'core/theme.dart'; // NOVO IMPORT!
+import 'core/theme.dart';
+import 'services/notificacao_service.dart';
+
+// Função OBRIGATÓRIA para rodar notificações em background (app fechado).
+// Tem que ficar solta aqui fora, não pode estar dentro de nenhuma classe.
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  debugPrint("📩 Mensagem recebida em Background: ${message.messageId}");
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  // Ativa o ouvinte para quando o app estiver fechado
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+  // Pede permissão e pega o token do celular
+  await NotificacaoService.inicializar();
 
   runApp(const LeiturasMCApp());
 }

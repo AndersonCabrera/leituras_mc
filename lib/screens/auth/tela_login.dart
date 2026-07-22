@@ -6,6 +6,7 @@ import '../leiturista/tela_condominios.dart';
 import '../admin/tela_admin_dashboard.dart';
 import '../super_admin/tela_super_admin_dashboard.dart';
 import '../../core/theme.dart'; // IMPORT DO NOSSO BOTÃO
+import '../../services/notificacao_service.dart'; // 💡 IMPORTAÇÃO DO SERVIÇO DE NOTIFICAÇÕES
 
 class EcraLogin extends StatefulWidget {
   const EcraLogin({super.key});
@@ -63,6 +64,9 @@ class _EcraLoginState extends State<EcraLogin> {
               fichaUsuario.data().toString().contains('id_administradora')
               ? fichaUsuario.get('id_administradora')
               : null;
+
+          // 💡 SALVA O TOKEN DO TELEMÓVEL NO FIREBASE PARA ESTE UTILIZADOR
+          await NotificacaoService.salvarTokenNoBanco(credencial.user!.uid);
 
           if (cargo == 'leiturista' && mounted) {
             Navigator.pushReplacement(

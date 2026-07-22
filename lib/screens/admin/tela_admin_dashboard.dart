@@ -7,6 +7,7 @@ import '../auth/tela_login.dart';
 import 'tela_configuracoes_marca.dart';
 import 'tela_auditoria.dart';
 import 'tela_fechamento_lote.dart';
+import 'tela_enviar_notificacao.dart'; // 💡 IMPORTAÇÃO DA NOVA TELA
 
 import 'tela_relatorios.dart';
 import 'tela_gestao_predios.dart';
@@ -242,9 +243,8 @@ class TelaAdminDashboard extends StatelessWidget {
                           () => Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => TelaGerenciarEquipes(
-                                idAdministradora: idAdministradora,
-                              ),
+                              builder: (_) =>
+                                  TelaGestaoPredios(adminId: idAdministradora),
                             ),
                           ),
                         ),
@@ -329,8 +329,8 @@ class TelaAdminDashboard extends StatelessWidget {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (_) => TelaGerenciarEquipes(
-                                  idAdministradora: idAdministradora,
+                                builder: (_) => TelaGestaoPredios(
+                                  adminId: idAdministradora,
                                 ),
                               ),
                             );
@@ -379,121 +379,31 @@ class TelaAdminDashboard extends StatelessWidget {
                       ),
                     ],
                   ),
-                ],
-              ),
-            ),
-          ),
-
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Cadastros',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: corTextoTitulo,
-                    ),
-                  ),
                   const SizedBox(height: 15),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: corCartao,
-                      borderRadius: BorderRadius.circular(15),
-                      border: Border.all(color: corBorda),
-                    ),
-                    child: Column(
-                      children: [
-                        ListTile(
-                          leading: Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: isDark
-                                  ? Colors.blue.shade900.withOpacity(0.5)
-                                  : Colors.blue.shade50,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Icon(
-                              Icons.domain_add_rounded,
-                              color: Colors.blue.shade700,
-                            ),
-                          ),
-                          title: Text(
-                            'Registar Novo Prédio',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              color: corTextoTitulo,
-                            ),
-                          ),
-                          subtitle: Text(
-                            'Adicionar condomínio e medidores',
-                            style: TextStyle(
-                              color: isDark
-                                  ? Colors.grey.shade400
-                                  : Colors.grey.shade700,
-                            ),
-                          ),
-                          trailing: const Icon(
-                            Icons.chevron_right_rounded,
-                            color: Colors.grey,
-                          ),
-                          onTap: () => Navigator.push(
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _actionCard(
+                          context,
+                          'Avisos Push',
+                          'Notificar Equipe',
+                          Icons.notifications_active_rounded,
+                          Colors.blue.shade600,
+                          () => Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => TelaCadastroPredio(
+                              builder: (_) => TelaEnviarNotificacao(
                                 idAdministradora: idAdministradora,
                               ),
                             ),
                           ),
                         ),
-                        Divider(height: 1, color: corBorda),
-                        ListTile(
-                          leading: Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: isDark
-                                  ? Colors.green.shade900.withOpacity(0.5)
-                                  : Colors.green.shade50,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Icon(
-                              Icons.person_add_rounded,
-                              color: Colors.green.shade700,
-                            ),
-                          ),
-                          title: Text(
-                            'Registar Leiturista',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              color: corTextoTitulo,
-                            ),
-                          ),
-                          subtitle: Text(
-                            'Criar acesso para a equipe de campo',
-                            style: TextStyle(
-                              color: isDark
-                                  ? Colors.grey.shade400
-                                  : Colors.grey.shade700,
-                            ),
-                          ),
-                          trailing: const Icon(
-                            Icons.chevron_right_rounded,
-                            color: Colors.grey,
-                          ),
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => TelaCadastroLeiturista(
-                                idAdministradora: idAdministradora,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(width: 15),
+                      Expanded(
+                        child: const SizedBox(),
+                      ), // 💡 Espaço vazio para manter o layout bonito e alinhado
+                    ],
                   ),
                 ],
               ),

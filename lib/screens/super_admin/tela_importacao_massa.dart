@@ -107,13 +107,18 @@ class _TelaImportacaoMassaState extends State<TelaImportacaoMassa> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final corFundoInput = isDark ? const Color(0xFF1E1E1E) : Colors.white;
+    final corTextHint = isDark ? Colors.grey.shade400 : Colors.black54;
+
     return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text(
           'Importação em Massa',
           style: TextStyle(color: Colors.white),
         ),
-        backgroundColor: Colors.green.shade700,
+        backgroundColor: isDark ? Colors.green.shade900 : Colors.green.shade700,
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: _salvando
@@ -121,11 +126,19 @@ class _TelaImportacaoMassaState extends State<TelaImportacaoMassa> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const CircularProgressIndicator(),
+                  CircularProgressIndicator(
+                    color: isDark
+                        ? Colors.green.shade300
+                        : Colors.green.shade700,
+                  ),
                   const SizedBox(height: 16),
                   Text(
                     'A processar e construir banco de dados...',
-                    style: TextStyle(color: Colors.grey.shade600),
+                    style: TextStyle(
+                      color: isDark
+                          ? Colors.grey.shade400
+                          : Colors.grey.shade600,
+                    ),
                   ),
                 ],
               ),
@@ -138,28 +151,37 @@ class _TelaImportacaoMassaState extends State<TelaImportacaoMassa> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.blue.shade50,
+                      color: isDark
+                          ? Colors.blue.shade900.withOpacity(0.3)
+                          : Colors.blue.shade50,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(
-                      children: const [
-                        Icon(Icons.info_outline, color: Colors.blue),
-                        SizedBox(width: 10),
+                      children: [
+                        Icon(
+                          Icons.info_outline,
+                          color: isDark ? Colors.blue.shade300 : Colors.blue,
+                        ),
+                        const SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             'Copie a coluna com o número das unidades no seu Excel e cole na caixa abaixo.',
-                            style: TextStyle(color: Colors.blue),
+                            style: TextStyle(
+                              color: isDark
+                                  ? Colors.blue.shade200
+                                  : Colors.blue,
+                            ),
                           ),
                         ),
                       ],
                     ),
                   ),
                   const SizedBox(height: 20),
-                  const Text(
+                  Text(
                     'DADOS DO PRÉDIO',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: Colors.black54,
+                      color: corTextHint,
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -180,11 +202,11 @@ class _TelaImportacaoMassaState extends State<TelaImportacaoMassa> {
                   ),
 
                   const SizedBox(height: 25),
-                  const Text(
+                  Text(
                     'MEDIDORES DO PRÉDIO',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: Colors.black54,
+                      color: corTextHint,
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -194,6 +216,10 @@ class _TelaImportacaoMassaState extends State<TelaImportacaoMassa> {
                         child: CheckboxListTile(
                           title: const Text('Água'),
                           value: _temAgua,
+                          activeColor: isDark
+                              ? Colors.green.shade400
+                              : Colors.green.shade700,
+                          checkColor: isDark ? Colors.black : Colors.white,
                           onChanged: (v) =>
                               setState(() => _temAgua = v ?? false),
                         ),
@@ -202,6 +228,10 @@ class _TelaImportacaoMassaState extends State<TelaImportacaoMassa> {
                         child: CheckboxListTile(
                           title: const Text('Gás'),
                           value: _temGas,
+                          activeColor: isDark
+                              ? Colors.green.shade400
+                              : Colors.green.shade700,
+                          checkColor: isDark ? Colors.black : Colors.white,
                           onChanged: (v) =>
                               setState(() => _temGas = v ?? false),
                         ),
@@ -210,6 +240,10 @@ class _TelaImportacaoMassaState extends State<TelaImportacaoMassa> {
                         child: CheckboxListTile(
                           title: const Text('Energia'),
                           value: _temEnergia,
+                          activeColor: isDark
+                              ? Colors.green.shade400
+                              : Colors.green.shade700,
+                          checkColor: isDark ? Colors.black : Colors.white,
                           onChanged: (v) =>
                               setState(() => _temEnergia = v ?? false),
                         ),
@@ -218,22 +252,22 @@ class _TelaImportacaoMassaState extends State<TelaImportacaoMassa> {
                   ),
 
                   const SizedBox(height: 25),
-                  const Text(
+                  Text(
                     'COLAR UNIDADES (EXCEL)',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: Colors.black54,
+                      color: corTextHint,
                     ),
                   ),
                   const SizedBox(height: 10),
                   TextField(
                     controller: _apartamentosCtrl,
                     maxLines: 10,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText: 'Cole aqui...\n101\n102\n103...',
-                      border: OutlineInputBorder(),
+                      border: const OutlineInputBorder(),
                       filled: true,
-                      fillColor: Colors.white,
+                      fillColor: corFundoInput,
                     ),
                   ),
 
@@ -243,16 +277,18 @@ class _TelaImportacaoMassaState extends State<TelaImportacaoMassa> {
                     height: 50,
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green.shade700,
+                        backgroundColor: isDark
+                            ? Colors.green.shade600
+                            : Colors.green.shade700,
                       ),
-                      icon: const Icon(
+                      icon: Icon(
                         Icons.check_circle_outline,
-                        color: Colors.white,
+                        color: isDark ? Colors.black : Colors.white,
                       ),
-                      label: const Text(
+                      label: Text(
                         'PROCESSAR IMPORTAÇÃO',
                         style: TextStyle(
-                          color: Colors.white,
+                          color: isDark ? Colors.black : Colors.white,
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
                         ),

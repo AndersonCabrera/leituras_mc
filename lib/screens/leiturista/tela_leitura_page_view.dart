@@ -2,15 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:io' as io;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:path_provider/path_provider.dart';
 import '../../services/banco_local.dart';
 import '../../core/formatters.dart';
-// Note que importei do path correto. Será criado depois caso não exista.
-import '../../config/app_config.dart';
 
 enum StatusLeitura { pendente, lendo, lido }
 
@@ -89,15 +86,17 @@ class _TelaLeituraPageViewState extends State<TelaLeituraPageView> {
   }
 
   void _abrirMenuLista() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => Container(
         height: MediaQuery.of(context).size.height * 0.7,
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
         ),
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -105,17 +104,26 @@ class _TelaLeituraPageViewState extends State<TelaLeituraPageView> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text(
+                Text(
                   "Lista de Apartamentos",
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.close),
+                  icon: Icon(
+                    Icons.close,
+                    color: isDark ? Colors.white70 : Colors.black54,
+                  ),
                   onPressed: () => Navigator.pop(context),
                 ),
               ],
             ),
-            const Divider(),
+            Divider(
+              color: isDark ? Colors.grey.shade800 : Colors.grey.shade300,
+            ),
             Expanded(
               child: GridView.builder(
                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -129,17 +137,29 @@ class _TelaLeituraPageViewState extends State<TelaLeituraPageView> {
                   String apto = widget.apartamentos[index].toString();
                   StatusLeitura status =
                       statusApartamentos[apto] ?? StatusLeitura.pendente;
-                  Color bgColor;
-                  Color textColor = Colors.black87;
 
+                  Color bgColor;
+                  Color textColor = isDark ? Colors.white : Colors.black87;
+
+                  // Lógica de Cores Inteligentes (Dark/Light Mode)
                   if (status == StatusLeitura.lido) {
-                    bgColor = Colors.green.shade100;
-                    textColor = Colors.green.shade900;
+                    bgColor = isDark
+                        ? Colors.green.shade900.withOpacity(0.4)
+                        : Colors.green.shade100;
+                    textColor = isDark
+                        ? Colors.green.shade300
+                        : Colors.green.shade900;
                   } else if (status == StatusLeitura.lendo) {
-                    bgColor = Colors.amber.shade100;
-                    textColor = Colors.amber.shade900;
+                    bgColor = isDark
+                        ? Colors.amber.shade900.withOpacity(0.4)
+                        : Colors.amber.shade100;
+                    textColor = isDark
+                        ? Colors.amber.shade300
+                        : Colors.amber.shade900;
                   } else {
-                    bgColor = Colors.grey.shade200;
+                    bgColor = isDark
+                        ? Colors.grey.shade800
+                        : Colors.grey.shade200;
                   }
 
                   return InkWell(
@@ -153,7 +173,9 @@ class _TelaLeituraPageViewState extends State<TelaLeituraPageView> {
                         borderRadius: BorderRadius.circular(8),
                         border: _paginaAtual == index
                             ? Border.all(
-                                color: const Color(0xFF0D47A1),
+                                color: isDark
+                                    ? Colors.blue.shade300
+                                    : const Color(0xFF0D47A1),
                                 width: 2,
                               )
                             : null,
@@ -186,11 +208,12 @@ class _TelaLeituraPageViewState extends State<TelaLeituraPageView> {
 
   @override
   Widget build(BuildContext context) {
-    const azul = Color(0xFF0D47A1);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final azul = isDark ? Colors.blueGrey.shade900 : const Color(0xFF0D47A1);
     final total = widget.apartamentos.length;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F6FA),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         backgroundColor: azul,
         elevation: 0,
@@ -310,7 +333,6 @@ class ApartamentoLeituraPage extends StatefulWidget {
 class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
     with AutomaticKeepAliveClientMixin {
   static const Color _azul = Color(0xFF0D47A1);
-  static const Color _laranja = Color(0xFFE65100);
 
   double? leituraAnterior;
   String referenciaAnterior = '--/----';
@@ -321,11 +343,11 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
   String? idLeituraExistente;
   bool houveTrocaOuCorrecao = false;
   bool loteFechado = false;
+  double limiteConsumoCustomizado = 1.0;
 
   final ImagePicker _picker = ImagePicker();
   XFile? fotoComprovante;
   bool salvando = false;
-  bool processandoIA = false;
 
   final TextEditingController _leituraCtrl = TextEditingController();
   final FocusNode _focusNode = FocusNode();
@@ -394,9 +416,16 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
       if (query.docs.isNotEmpty) {
         var dados = query.docs.first.data();
         List<dynamic> lotes = dados['lotes_fechados'] ?? [];
+
+        double limite = 1.0;
+        if (dados.containsKey('limite_consumo_alerta')) {
+          limite = (dados['limite_consumo_alerta'] as num).toDouble();
+        }
+
         if (mounted) {
           setState(() {
             loteFechado = lotes.contains(mesAtual);
+            limiteConsumoCustomizado = limite;
             if (loteFechado) _focusNode.unfocus();
           });
         }
@@ -543,100 +572,12 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
     if (foto != null) setState(() => fotoComprovante = foto);
   }
 
-  Future<void> _lerComIA() async {
-    final fotoOriginal = await _picker.pickImage(
-      source: ImageSource.camera,
-      imageQuality: 85,
-      maxWidth: 1600,
-      maxHeight: 1600,
-    );
-    if (fotoOriginal == null) return;
-    setState(() => processandoIA = true);
-
-    try {
-      final bytes = await fotoOriginal.readAsBytes();
-      final base64Image = base64Encode(bytes);
-
-      if (AppConfig.cloudVisionApiKey.isEmpty) {
-        _toast('Chave da API não configurada.', Colors.red);
-        return;
-      }
-
-      final uri = Uri.parse(
-        'https://vision.googleapis.com/v1/images:annotate?key=${AppConfig.cloudVisionApiKey}',
-      );
-      final response = await http.post(
-        uri,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'requests': [
-            {
-              'image': {'content': base64Image},
-              'features': [
-                {'type': 'DOCUMENT_TEXT_DETECTION', 'maxResults': 1},
-              ],
-              'imageContext': {
-                'languageHints': ['pt', 'en'],
-              },
-            },
-          ],
-        }),
-      );
-
-      if (response.statusCode != 200) {
-        _toast('Erro na API (${response.statusCode}).', Colors.red);
-        return;
-      }
-
-      final data = jsonDecode(response.body);
-      final texto = data['responses']?[0]?['fullTextAnnotation']?['text'] ?? '';
-      final numeros = texto.replaceAll(RegExp(r'[^0-9]'), '');
-      final medidor = widget.medidorSelecionado?.toLowerCase() ?? '';
-      String? resultado;
-
-      if (numeros.isNotEmpty) {
-        if (medidor.contains('gas') && numeros.length >= 8) {
-          final n = numeros.substring(0, 8);
-          resultado = '${n.substring(0, 5)},${n.substring(5)}';
-        } else if (medidor.contains('agua')) {
-          if (numeros.length >= 7) {
-            final n = numeros.substring(0, 7);
-            resultado = '${n.substring(0, 4)},${n.substring(4)}';
-          } else if (numeros.length == 6) {
-            resultado = '${numeros.substring(0, 4)},${numeros.substring(4)}0';
-          }
-        }
-        resultado ??= numeros;
-      }
-
-      if (resultado != null) {
-        setState(() {
-          _leituraCtrl.text = resultado!;
-          fotoComprovante = fotoOriginal;
-        });
-        _calcularConsumo(resultado);
-        _toast(
-          '✅ Leitura capturada! Confirme se está correta.',
-          Colors.green.shade700,
-        );
-      } else {
-        _toast(
-          '⚠️ Não consegui ler. Tente digitar manualmente.',
-          Colors.orange.shade700,
-        );
-      }
-    } catch (e) {
-      _toast('Erro: $e', Colors.red);
-    } finally {
-      setState(() => processandoIA = false);
-    }
-  }
-
   void _verificarEGuardar() {
     if (leituraAtual != null &&
         leituraAnterior != null &&
         !houveTrocaOuCorrecao) {
-      double limiteConsumoSeguro = 1.0;
+      double limiteConsumoSeguro = limiteConsumoCustomizado;
+
       if (consumoCalculado! >= limiteConsumoSeguro) {
         if (fotoComprovante == null) {
           String unidadeAtual = _unidadeMedidor(
@@ -783,9 +724,11 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
   }
 
   void _abrirMenuSecundario() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
@@ -799,34 +742,22 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
               height: 4,
               margin: const EdgeInsets.only(bottom: 16),
               decoration: BoxDecoration(
-                color: const Color(0xFFCFD8DC),
+                color: isDark ? Colors.grey.shade700 : const Color(0xFFCFD8DC),
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
-            const Text(
+            Text(
               'Opções adicionais',
               style: TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFF37474F),
+                color: isDark ? Colors.white : const Color(0xFF37474F),
               ),
             ),
             const SizedBox(height: 16),
             _ItemMenu(
-              icon: Icons.document_scanner_rounded,
-              cor: _laranja,
-              titulo: 'Ler com IA',
-              subtitulo: 'Tira foto e tenta ler o medidor automaticamente',
-              carregando: processandoIA,
-              onTap: () {
-                Navigator.pop(context);
-                _lerComIA();
-              },
-            ),
-            const SizedBox(height: 8),
-            _ItemMenu(
               icon: Icons.photo_library_rounded,
-              cor: _azul,
+              cor: isDark ? Colors.blue.shade300 : _azul,
               titulo: 'Escolher da galeria',
               subtitulo: 'Seleciona uma foto já tirada',
               onTap: () {
@@ -843,6 +774,20 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // Variáveis de Cor Inteligentes
+    final corCartao = isDark ? const Color(0xFF1E1E1E) : Colors.white;
+    final corBorda = isDark ? Colors.grey.shade800 : const Color(0xFFECEFF1);
+    final corTextoForte = isDark ? Colors.white : const Color(0xFF1A1A2E);
+    final corTextoFraco = isDark
+        ? Colors.grey.shade400
+        : const Color(0xFF90A4AE);
+    final corDestaque = isDark ? Colors.blue.shade300 : _azul;
+    final corFundoInput = isDark
+        ? const Color(0xFF2A2A2A)
+        : const Color(0xFFF5F6FA);
+
     final leituraInvalida =
         leituraAnterior != null &&
         consumoCalculado != null &&
@@ -866,19 +811,19 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                     children: [
                       Text(
                         widget.apartamento,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 52,
                           fontWeight: FontWeight.w700,
-                          color: Color(0xFF1A1A2E),
+                          color: corTextoForte,
                           letterSpacing: -1,
                           height: 1,
                         ),
                       ),
-                      const Text(
+                      Text(
                         'Apartamento',
                         style: TextStyle(
                           fontSize: 13,
-                          color: Color(0xFF90A4AE),
+                          color: corTextoFraco,
                           letterSpacing: 0.5,
                         ),
                       ),
@@ -895,22 +840,33 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                       vertical: 12,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.red.shade50,
+                      color: isDark
+                          ? Colors.red.shade900.withOpacity(0.3)
+                          : Colors.red.shade50,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: Colors.red.shade200,
+                        color: isDark
+                            ? Colors.red.shade800
+                            : Colors.red.shade200,
                         width: 1.5,
                       ),
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.lock_rounded, color: Colors.red.shade700),
+                        Icon(
+                          Icons.lock_rounded,
+                          color: isDark
+                              ? Colors.red.shade400
+                              : Colors.red.shade700,
+                        ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
                             'Lote Encerrado.\nA administradora bloqueou o envio ou edição de leituras para este prédio.',
                             style: TextStyle(
-                              color: Colors.red.shade900,
+                              color: isDark
+                                  ? Colors.red.shade200
+                                  : Colors.red.shade900,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
@@ -935,16 +891,16 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                               vertical: 8,
                             ),
                             decoration: BoxDecoration(
-                              color: sel ? _azul : Colors.white,
+                              color: sel ? corDestaque : corCartao,
                               borderRadius: BorderRadius.circular(20),
                               border: Border.all(
-                                color: sel ? _azul : const Color(0xFFCFD8DC),
+                                color: sel ? corDestaque : corBorda,
                                 width: 0.8,
                               ),
                               boxShadow: sel
                                   ? [
                                       BoxShadow(
-                                        color: _azul.withOpacity(0.2),
+                                        color: corDestaque.withOpacity(0.2),
                                         blurRadius: 6,
                                         offset: const Offset(0, 2),
                                       ),
@@ -955,8 +911,8 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                               _nomeMedidor(m.toString()),
                               style: TextStyle(
                                 color: sel
-                                    ? Colors.white
-                                    : const Color(0xFF607D8B),
+                                    ? (isDark ? Colors.black : Colors.white)
+                                    : corTextoFraco,
                                 fontWeight: FontWeight.w600,
                                 fontSize: 13,
                               ),
@@ -971,37 +927,38 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: corCartao,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: const Color(0xFFECEFF1),
-                      width: 0.8,
-                    ),
+                    border: Border.all(color: corBorda, width: 0.8),
                   ),
                   child: Row(
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.history_rounded,
-                        color: Color(0xFFB0BEC5),
+                        color: isDark
+                            ? Colors.grey.shade600
+                            : const Color(0xFFB0BEC5),
                         size: 18,
                       ),
                       const SizedBox(width: 10),
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             'Leitura anterior',
                             style: TextStyle(
                               fontSize: 12,
-                              color: Color(0xFF90A4AE),
+                              color: corTextoFraco,
                             ),
                           ),
                           const SizedBox(height: 2),
                           Text(
                             referenciaAnterior,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12,
-                              color: Color(0xFF607D8B),
+                              color: isDark
+                                  ? Colors.grey.shade300
+                                  : const Color(0xFF607D8B),
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -1009,23 +966,27 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                       ),
                       const Spacer(),
                       carregandoLeitura
-                          ? const SizedBox(
+                          ? SizedBox(
                               width: 16,
                               height: 16,
                               child: CircularProgressIndicator(
                                 strokeWidth: 2,
-                                color: Color(0xFF90A4AE),
+                                color: corTextoFraco,
                               ),
                             )
                           : Text(
                               leituraAnterior == null
                                   ? 'Offline'
                                   : '${leituraAnterior!.toStringAsFixed(3).replaceAll('.', ',')} $unidade',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.w600,
-                                color: Color(0xFF546E7A),
-                                fontFeatures: [FontFeature.tabularFigures()],
+                                color: isDark
+                                    ? Colors.grey.shade200
+                                    : const Color(0xFF546E7A),
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures(),
+                                ],
                               ),
                             ),
                     ],
@@ -1035,14 +996,16 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
 
                 Container(
                   decoration: BoxDecoration(
-                    color: loteFechado ? Colors.grey.shade100 : Colors.white,
+                    color: loteFechado
+                        ? (isDark ? Colors.grey.shade900 : Colors.grey.shade100)
+                        : corCartao,
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                       color: leituraInvalida
-                          ? Colors.red.shade300
+                          ? (isDark ? Colors.red.shade800 : Colors.red.shade300)
                           : _leituraCtrl.text.isNotEmpty
-                          ? _azul.withOpacity(0.4)
-                          : const Color(0xFFECEFF1),
+                          ? corDestaque.withOpacity(0.4)
+                          : corBorda,
                       width: leituraInvalida || _leituraCtrl.text.isNotEmpty
                           ? 1.2
                           : 0.8,
@@ -1050,7 +1013,9 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                     boxShadow: _leituraCtrl.text.isNotEmpty && !leituraInvalida
                         ? [
                             BoxShadow(
-                              color: _azul.withOpacity(0.08),
+                              color: corDestaque.withOpacity(
+                                isDark ? 0.3 : 0.08,
+                              ),
                               blurRadius: 10,
                               offset: const Offset(0, 3),
                             ),
@@ -1065,7 +1030,7 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                           children: [
                             Icon(
                               Icons.speed_rounded,
-                              color: loteFechado ? Colors.grey : _azul,
+                              color: loteFechado ? Colors.grey : corDestaque,
                               size: 18,
                             ),
                             const SizedBox(width: 8),
@@ -1074,7 +1039,7 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                               style: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w600,
-                                color: loteFechado ? Colors.grey : _azul,
+                                color: loteFechado ? Colors.grey : corDestaque,
                               ),
                             ),
                             const Spacer(),
@@ -1086,23 +1051,23 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                                   vertical: 5,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFF5F6FA),
+                                  color: corFundoInput,
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
-                                  children: const [
+                                  children: [
                                     Icon(
                                       Icons.more_horiz_rounded,
-                                      color: Color(0xFF90A4AE),
+                                      color: corTextoFraco,
                                       size: 18,
                                     ),
-                                    SizedBox(width: 4),
+                                    const SizedBox(width: 4),
                                     Text(
                                       'Mais',
                                       style: TextStyle(
                                         fontSize: 12,
-                                        color: Color(0xFF90A4AE),
+                                        color: corTextoFraco,
                                         fontWeight: FontWeight.w500,
                                       ),
                                     ),
@@ -1124,18 +1089,18 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                         style: TextStyle(
                           fontSize: 44,
                           fontWeight: FontWeight.w700,
-                          color: loteFechado
-                              ? Colors.grey
-                              : const Color(0xFF1A1A2E),
+                          color: loteFechado ? Colors.grey : corTextoForte,
                           letterSpacing: 1,
                           fontFeatures: const [FontFeature.tabularFigures()],
                         ),
                         decoration: InputDecoration(
                           hintText: '0000,000',
-                          hintStyle: const TextStyle(
+                          hintStyle: TextStyle(
                             fontSize: 44,
                             fontWeight: FontWeight.w700,
-                            color: Color(0xFFCFD8DC),
+                            color: isDark
+                                ? Colors.grey.shade800
+                                : const Color(0xFFCFD8DC),
                             letterSpacing: 1,
                           ),
                           border: InputBorder.none,
@@ -1144,9 +1109,9 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                             vertical: 12,
                           ),
                           suffixText: unidade,
-                          suffixStyle: const TextStyle(
+                          suffixStyle: TextStyle(
                             fontSize: 16,
-                            color: Color(0xFF90A4AE),
+                            color: corTextoFraco,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -1169,17 +1134,23 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                   ),
                   decoration: BoxDecoration(
                     color: consumoCalculado == null
-                        ? const Color(0xFFF5F6FA)
+                        ? corFundoInput
                         : leituraInvalida
-                        ? Colors.red.shade50
-                        : Colors.green.shade50,
+                        ? (isDark
+                              ? Colors.red.shade900.withOpacity(0.2)
+                              : Colors.red.shade50)
+                        : (isDark
+                              ? Colors.green.shade900.withOpacity(0.2)
+                              : Colors.green.shade50),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                       color: consumoCalculado == null
-                          ? const Color(0xFFECEFF1)
+                          ? corBorda
                           : leituraInvalida
-                          ? Colors.red.shade200
-                          : Colors.green.shade200,
+                          ? (isDark ? Colors.red.shade800 : Colors.red.shade200)
+                          : (isDark
+                                ? Colors.green.shade800
+                                : Colors.green.shade200),
                       width: 0.8,
                     ),
                   ),
@@ -1195,10 +1166,16 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                                 ? Icons.trending_down_rounded
                                 : Icons.trending_up_rounded,
                             color: consumoCalculado == null
-                                ? const Color(0xFFB0BEC5)
+                                ? (isDark
+                                      ? Colors.grey.shade600
+                                      : const Color(0xFFB0BEC5))
                                 : leituraInvalida
-                                ? Colors.red.shade600
-                                : Colors.green.shade600,
+                                ? (isDark
+                                      ? Colors.red.shade400
+                                      : Colors.red.shade600)
+                                : (isDark
+                                      ? Colors.green.shade400
+                                      : Colors.green.shade600),
                             size: 18,
                           ),
                           const SizedBox(width: 8),
@@ -1208,10 +1185,16 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                               fontSize: 13,
                               fontWeight: FontWeight.w500,
                               color: consumoCalculado == null
-                                  ? const Color(0xFFB0BEC5)
+                                  ? (isDark
+                                        ? Colors.grey.shade600
+                                        : const Color(0xFFB0BEC5))
                                   : leituraInvalida
-                                  ? Colors.red.shade700
-                                  : Colors.green.shade700,
+                                  ? (isDark
+                                        ? Colors.red.shade400
+                                        : Colors.red.shade700)
+                                  : (isDark
+                                        ? Colors.green.shade400
+                                        : Colors.green.shade700),
                             ),
                           ),
                         ],
@@ -1224,10 +1207,16 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                           fontSize: 20,
                           fontWeight: FontWeight.w700,
                           color: consumoCalculado == null
-                              ? const Color(0xFFCFD8DC)
+                              ? (isDark
+                                    ? Colors.grey.shade700
+                                    : const Color(0xFFCFD8DC))
                               : leituraInvalida
-                              ? Colors.red.shade700
-                              : Colors.green.shade700,
+                              ? (isDark
+                                    ? Colors.red.shade400
+                                    : Colors.red.shade700)
+                              : (isDark
+                                    ? Colors.green.shade400
+                                    : Colors.green.shade700),
                           fontFeatures: const [FontFeature.tabularFigures()],
                         ),
                       ),
@@ -1246,31 +1235,37 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                       vertical: 12,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: corCartao,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
                         color: fotoComprovante != null
-                            ? Colors.green.shade300
-                            : const Color(0xFFECEFF1),
+                            ? (isDark
+                                  ? Colors.green.shade600
+                                  : Colors.green.shade300)
+                            : corBorda,
                         width: 0.8,
                       ),
                     ),
                     child: fotoComprovante != null
                         ? Row(
                             children: [
-                              const Icon(
+                              Icon(
                                 Icons.check_circle_rounded,
-                                color: Colors.green,
+                                color: isDark
+                                    ? Colors.green.shade400
+                                    : Colors.green,
                                 size: 20,
                               ),
                               const SizedBox(width: 10),
-                              const Expanded(
+                              Expanded(
                                 child: Text(
                                   'Foto anexada',
                                   style: TextStyle(
                                     fontSize: 14,
                                     fontWeight: FontWeight.w500,
-                                    color: Colors.green,
+                                    color: isDark
+                                        ? Colors.green.shade400
+                                        : Colors.green,
                                   ),
                                 ),
                               ),
@@ -1280,9 +1275,11 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                                     : () => setState(
                                         () => fotoComprovante = null,
                                       ),
-                                child: const Icon(
+                                child: Icon(
                                   Icons.close_rounded,
-                                  color: Color(0xFFB0BEC5),
+                                  color: isDark
+                                      ? Colors.grey.shade600
+                                      : const Color(0xFFB0BEC5),
                                   size: 18,
                                 ),
                               ),
@@ -1293,8 +1290,8 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                               Icon(
                                 Icons.camera_alt_rounded,
                                 color: loteFechado
-                                    ? Colors.grey.shade300
-                                    : const Color(0xFF90A4AE),
+                                    ? Colors.grey.shade600
+                                    : corTextoFraco,
                                 size: 20,
                               ),
                               const SizedBox(width: 10),
@@ -1303,16 +1300,18 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                                 style: TextStyle(
                                   fontSize: 14,
                                   color: loteFechado
-                                      ? Colors.grey.shade300
-                                      : const Color(0xFF90A4AE),
+                                      ? Colors.grey.shade600
+                                      : corTextoFraco,
                                 ),
                               ),
                               const Spacer(),
                               Icon(
                                 Icons.chevron_right_rounded,
                                 color: loteFechado
-                                    ? Colors.grey.shade200
-                                    : const Color(0xFFCFD8DC),
+                                    ? Colors.grey.shade800
+                                    : (isDark
+                                          ? Colors.grey.shade700
+                                          : const Color(0xFFCFD8DC)),
                                 size: 18,
                               ),
                             ],
@@ -1325,13 +1324,15 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                   duration: const Duration(milliseconds: 200),
                   decoration: BoxDecoration(
                     color: houveTrocaOuCorrecao
-                        ? Colors.red.shade50
-                        : Colors.white,
+                        ? (isDark
+                              ? Colors.red.shade900.withOpacity(0.2)
+                              : Colors.red.shade50)
+                        : corCartao,
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                       color: houveTrocaOuCorrecao
-                          ? Colors.red.shade200
-                          : const Color(0xFFECEFF1),
+                          ? (isDark ? Colors.red.shade800 : Colors.red.shade200)
+                          : corBorda,
                       width: 0.8,
                     ),
                   ),
@@ -1348,7 +1349,9 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                         fontWeight: FontWeight.w500,
                         color: loteFechado
                             ? Colors.grey
-                            : const Color(0xFF37474F),
+                            : (isDark
+                                  ? Colors.grey.shade200
+                                  : const Color(0xFF37474F)),
                       ),
                     ),
                     subtitle: Text(
@@ -1356,12 +1359,15 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                       style: TextStyle(
                         fontSize: 12,
                         color: loteFechado
-                            ? Colors.grey.shade400
-                            : const Color(0xFF90A4AE),
+                            ? Colors.grey.shade600
+                            : corTextoFraco,
                       ),
                     ),
                     value: houveTrocaOuCorrecao,
-                    activeColor: Colors.red.shade700,
+                    activeColor: isDark
+                        ? Colors.red.shade500
+                        : Colors.red.shade700,
+                    checkColor: isDark ? Colors.black : Colors.white,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -1381,10 +1387,14 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                         vertical: 10,
                       ),
                       decoration: BoxDecoration(
-                        color: Colors.red.shade50,
+                        color: isDark
+                            ? Colors.red.shade900.withOpacity(0.2)
+                            : Colors.red.shade50,
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
-                          color: Colors.red.shade200,
+                          color: isDark
+                              ? Colors.red.shade800
+                              : Colors.red.shade200,
                           width: 0.8,
                         ),
                       ),
@@ -1392,7 +1402,9 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                         children: [
                           Icon(
                             Icons.error_outline_rounded,
-                            color: Colors.red.shade700,
+                            color: isDark
+                                ? Colors.red.shade400
+                                : Colors.red.shade700,
                             size: 18,
                           ),
                           const SizedBox(width: 8),
@@ -1400,7 +1412,9 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                             'Leitura menor que a anterior',
                             style: TextStyle(
                               fontSize: 13,
-                              color: Colors.red.shade700,
+                              color: isDark
+                                  ? Colors.red.shade400
+                                  : Colors.red.shade700,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -1410,13 +1424,15 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                   ),
 
                 const SizedBox(height: 24),
-                const Center(
+                Center(
                   child: Text(
                     'MC PRESTADORA DE SERVIÇOS CONDOMINIAIS LTDA',
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w500,
-                      color: Color(0xFFB0BEC5),
+                      color: isDark
+                          ? Colors.grey.shade700
+                          : const Color(0xFFB0BEC5),
                       letterSpacing: 0.3,
                     ),
                   ),
@@ -1429,10 +1445,10 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: corCartao,
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
+                color: Colors.black.withOpacity(isDark ? 0.3 : 0.05),
                 blurRadius: 10,
                 offset: const Offset(0, -4),
               ),
@@ -1449,7 +1465,11 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                     style: OutlinedButton.styleFrom(
                       padding: EdgeInsets.zero,
                       side: BorderSide(
-                        color: widget.isPrimeiro ? Colors.grey.shade300 : _azul,
+                        color: widget.isPrimeiro
+                            ? (isDark
+                                  ? Colors.grey.shade800
+                                  : Colors.grey.shade300)
+                            : corDestaque,
                       ),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -1458,7 +1478,11 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                     child: Icon(
                       Icons.chevron_left_rounded,
                       size: 30,
-                      color: widget.isPrimeiro ? Colors.grey.shade400 : _azul,
+                      color: widget.isPrimeiro
+                          ? (isDark
+                                ? Colors.grey.shade700
+                                : Colors.grey.shade400)
+                          : corDestaque,
                     ),
                   ),
                 ),
@@ -1483,7 +1507,7 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                               loteFechado ? Icons.lock : Icons.check_rounded,
                               color: loteFechado
                                   ? Colors.grey.shade500
-                                  : Colors.white,
+                                  : (isDark ? Colors.black : Colors.white),
                             ),
                       label: Text(
                         loteFechado
@@ -1498,12 +1522,14 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                           fontWeight: FontWeight.bold,
                           color: loteFechado
                               ? Colors.grey.shade500
-                              : Colors.white,
+                              : (isDark ? Colors.black : Colors.white),
                         ),
                       ),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: _azul,
-                        disabledBackgroundColor: Colors.grey.shade300,
+                        backgroundColor: corDestaque,
+                        disabledBackgroundColor: isDark
+                            ? Colors.grey.shade800
+                            : Colors.grey.shade300,
                         elevation: podeSalvar ? 2 : 0,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
@@ -1521,7 +1547,11 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                     style: OutlinedButton.styleFrom(
                       padding: EdgeInsets.zero,
                       side: BorderSide(
-                        color: widget.isUltimo ? Colors.grey.shade300 : _azul,
+                        color: widget.isUltimo
+                            ? (isDark
+                                  ? Colors.grey.shade800
+                                  : Colors.grey.shade300)
+                            : corDestaque,
                       ),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -1530,7 +1560,11 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
                     child: Icon(
                       Icons.chevron_right_rounded,
                       size: 30,
-                      color: widget.isUltimo ? Colors.grey.shade400 : _azul,
+                      color: widget.isUltimo
+                          ? (isDark
+                                ? Colors.grey.shade700
+                                : Colors.grey.shade400)
+                          : corDestaque,
                     ),
                   ),
                 ),
@@ -1562,12 +1596,14 @@ class _ItemMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return GestureDetector(
       onTap: carregando ? null : onTap,
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: const Color(0xFFF5F6FA),
+          color: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFF5F6FA),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Row(
@@ -1597,26 +1633,28 @@ class _ItemMenu extends StatelessWidget {
                 children: [
                   Text(
                     titulo,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
-                      color: Color(0xFF37474F),
+                      color: isDark ? Colors.white : const Color(0xFF37474F),
                     ),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     subtitulo,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12,
-                      color: Color(0xFF90A4AE),
+                      color: isDark
+                          ? Colors.grey.shade400
+                          : const Color(0xFF90A4AE),
                     ),
                   ),
                 ],
               ),
             ),
-            const Icon(
+            Icon(
               Icons.chevron_right_rounded,
-              color: Color(0xFFCFD8DC),
+              color: isDark ? Colors.grey.shade600 : const Color(0xFFCFD8DC),
               size: 18,
             ),
           ],

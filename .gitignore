@@ -48,3 +48,7 @@ app.*.map.json
 # Chaves do Firebase (NUNCA SUBIR PARA O GITHUB)
 android/app/google-services.json
 ios/Runner/GoogleService-Info.plist
+
+# Chaves de Assinatura Android (Segurança)
+android/key.properties
+android/app/upload-keystore.jks
