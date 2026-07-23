@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 class TelaEnviarNotificacao extends StatefulWidget {
   final String idAdministradora;
@@ -16,6 +18,9 @@ class _TelaEnviarNotificacaoState extends State<TelaEnviarNotificacao> {
 
   List<Map<String, dynamic>> _leituristas = [];
   String _leituristaSelecionado = 'todos';
+
+  // ✅ LINK DA VERCEL CONFIGURADO PERFEITAMENTE
+  final String _vercelApiUrl = "https://leituras-mc.vercel.app/api/notificar";
 
   @override
   void initState() {
@@ -66,7 +71,7 @@ class _TelaEnviarNotificacaoState extends State<TelaEnviarNotificacao> {
     setState(() => _enviando = true);
 
     try {
-      // 💡 GRAVA NO BANCO A INTENÇÃO DE ENVIO
+      // 1. Grava no banco apenas para o histórico (Auditoria)
       await FirebaseFirestore.instance.collection('notificacoes_enviadas').add({
         'id_administradora': widget.idAdministradora,
         'destinatario_id': _leituristaSelecionado == 'todos'
@@ -78,23 +83,47 @@ class _TelaEnviarNotificacaoState extends State<TelaEnviarNotificacao> {
         'titulo': _tituloCtrl.text.trim(),
         'mensagem': _mensagemCtrl.text.trim(),
         'data_criacao': FieldValue.serverTimestamp(),
-        'status': 'pendente',
       });
 
+      // 2. Avisa a Vercel para fazer o disparo pros telemóveis!
+      final resposta = await http.post(
+        Uri.parse(_vercelApiUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'titulo': _tituloCtrl.text.trim(),
+          'mensagem': _mensagemCtrl.text.trim(),
+          'destinatario_id': _leituristaSelecionado,
+        }),
+      );
+
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Aviso disparado com sucesso!'),
-            backgroundColor: Colors.green,
-          ),
-        );
-        Navigator.pop(context);
+        if (resposta.statusCode == 200) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Aviso disparado com sucesso pelos servidores da Vercel!',
+              ),
+              backgroundColor: Colors.green,
+            ),
+          );
+          Navigator.pop(context);
+        } else {
+          // Exibe o erro se a Vercel reclamar de algo
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Erro na Vercel: ${resposta.statusCode} - ${resposta.body}',
+              ),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
     } catch (e) {
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erro ao enviar: $e'),
+            content: Text('Falha de conexão: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -138,7 +167,7 @@ class _TelaEnviarNotificacaoState extends State<TelaEnviarNotificacao> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'A mensagem aparecerá imediatamente na barra de notificações do telemóvel da equipa.',
+                      'A mensagem será processada pelo nosso servidor gratuito (Vercel) e aparecerá imediatamente no telemóvel da equipa.',
                       style: TextStyle(
                         color: isDark
                             ? Colors.blue.shade100
@@ -205,7 +234,7 @@ class _TelaEnviarNotificacaoState extends State<TelaEnviarNotificacao> {
             TextField(
               controller: _tituloCtrl,
               decoration: const InputDecoration(
-                labelText: 'Título Curto (Ex: Novo Prédio Adicionado)',
+                labelText: 'Título Curto (Ex: Novo Prédio)',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -230,7 +259,7 @@ class _TelaEnviarNotificacaoState extends State<TelaEnviarNotificacao> {
                 ),
                 icon: _enviando
                     ? const SizedBox()
-                    : const Icon(Icons.send_rounded, color: Colors.white),
+                    : const Icon(Icons.rocket_launch, color: Colors.white),
                 label: _enviando
                     ? const SizedBox(
                         height: 20,
@@ -241,7 +270,7 @@ class _TelaEnviarNotificacaoState extends State<TelaEnviarNotificacao> {
                         ),
                       )
                     : const Text(
-                        'DISPARAR NOTIFICAÇÃO',
+                        'DISPARAR VIA VERCEL',
                         style: TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
