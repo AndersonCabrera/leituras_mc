@@ -19,7 +19,6 @@ class _TelaEnviarNotificacaoState extends State<TelaEnviarNotificacao> {
   List<Map<String, dynamic>> _leituristas = [];
   String _leituristaSelecionado = 'todos';
 
-  // ✅ LINK DA VERCEL CONFIGURADO PERFEITAMENTE
   final String _vercelApiUrl = "https://leituras-mc.vercel.app/api/notificar";
 
   @override
@@ -93,6 +92,8 @@ class _TelaEnviarNotificacaoState extends State<TelaEnviarNotificacao> {
           'titulo': _tituloCtrl.text.trim(),
           'mensagem': _mensagemCtrl.text.trim(),
           'destinatario_id': _leituristaSelecionado,
+          'id_administradora': widget
+              .idAdministradora, // 💡 CORRIGIDO: Passa a administradora para o servidor
         }),
       );
 
@@ -108,7 +109,6 @@ class _TelaEnviarNotificacaoState extends State<TelaEnviarNotificacao> {
           );
           Navigator.pop(context);
         } else {
-          // Exibe o erro se a Vercel reclamar de algo
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(

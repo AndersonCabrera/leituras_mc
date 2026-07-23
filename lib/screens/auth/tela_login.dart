@@ -5,8 +5,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../leiturista/tela_condominios.dart';
 import '../admin/tela_admin_dashboard.dart';
 import '../super_admin/tela_super_admin_dashboard.dart';
-import '../../core/theme.dart'; // IMPORT DO NOSSO BOTÃO
-import '../../services/notificacao_service.dart'; // 💡 IMPORTAÇÃO DO SERVIÇO DE NOTIFICAÇÕES
+import '../../core/theme.dart';
+import '../../services/notificacao_service.dart';
 
 class EcraLogin extends StatefulWidget {
   const EcraLogin({super.key});
@@ -22,7 +22,6 @@ class _EcraLoginState extends State<EcraLogin> {
   bool carregando = false;
   bool _ocultarSenha = true;
 
-  // O relatório apontou falta de disposes. Isso previne que o app trave!
   @override
   void dispose() {
     emailController.dispose();
@@ -65,8 +64,12 @@ class _EcraLoginState extends State<EcraLogin> {
               ? fichaUsuario.get('id_administradora')
               : null;
 
-          // 💡 SALVA O TOKEN DO TELEMÓVEL NO FIREBASE PARA ESTE UTILIZADOR
-          await NotificacaoService.salvarTokenNoBanco(credencial.user!.uid);
+          // 💡 CORRIGIDO: Passamos a idAdmin e o cargo para o serviço de push
+          await NotificacaoService.salvarTokenNoBanco(
+            credencial.user!.uid,
+            idAdmin ?? '',
+            cargo,
+          );
 
           if (cargo == 'leiturista' && mounted) {
             Navigator.pushReplacement(
@@ -137,14 +140,10 @@ class _EcraLoginState extends State<EcraLogin> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // backgroundColor: Colors.white, <-- APAGUE OU COMENTE ESTA LINHA PARA O TEMA FUNCIONAR
       appBar: AppBar(
-        backgroundColor: Colors.transparent, // AppBar invisível
+        backgroundColor: Colors.transparent,
         elevation: 0,
-        actions: const [
-          BotaoTrocaTema(), // O NOSSO BOTÃO DISCRETO NO CANTO SUPERIOR DIREITO
-          SizedBox(width: 10),
-        ],
+        actions: const [BotaoTrocaTema(), SizedBox(width: 10)],
       ),
       body: Center(
         child: SingleChildScrollView(

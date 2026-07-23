@@ -1,19 +1,16 @@
 const admin = require('firebase-admin');
 
-// 1. Inicializa o Firebase com as "Chaves Secretas" que vamos colocar na Vercel
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert({
       projectId: process.env.FIREBASE_PROJECT_ID,
       clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      // A Vercel troca as quebras de linha por texto, isto corrige o problema:
       privateKey: process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') : undefined,
     })
   });
 }
 
 module.exports = async (req, res) => {
-  // 2. Configuração de Segurança (CORS) para permitir que o Flutter converse com esta API
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'OPTIONS, POST');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -27,17 +24,21 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const { titulo, mensagem, destinatario_id } = req.body;
+    const { titulo, mensagem, destinatario_id, id_administradora } = req.body;
 
-    if (!titulo || !mensagem) {
-      return res.status(400).json({ error: 'Título e mensagem são obrigatórios.' });
+    if (!titulo || !mensagem || !id_administradora) {
+      return res.status(400).json({ error: 'Título, mensagem e ID da administradora são obrigatórios.' });
     }
 
     let tokens = [];
 
-    // 3. Busca os "Números de Telefone" (Tokens) no Banco de Dados
     if (destinatario_id === 'todos' || !destinatario_id) {
-      const usersSnap = await admin.firestore().collection('usuarios').where('cargo', '==', 'leiturista').get();
+      // 💡 CORRIGIDO: Agora filtra para enviar notificações apenas à equipa desta empresa específica!
+      const usersSnap = await admin.firestore().collection('usuarios')
+        .where('cargo', '==', 'leiturista')
+        .where('id_administradora', '==', id_administradora)
+        .get();
+        
       usersSnap.forEach(doc => {
         if (doc.data().fcm_token) tokens.push(doc.data().fcm_token);
       });
@@ -49,10 +50,9 @@ module.exports = async (req, res) => {
     }
 
     if (tokens.length === 0) {
-      return res.status(200).json({ message: 'Nenhum telemóvel registado. Ninguém foi notificado.', successCount: 0 });
+      return res.status(200).json({ message: 'Nenhum telemóvel registado ou encontrado.', successCount: 0 });
     }
 
-    // 4. Prepara o Pacote de Envio
     const payload = {
       tokens: tokens,
       notification: {
@@ -61,7 +61,7 @@ module.exports = async (req, res) => {
       }
     };
 
-    // 5. Dispara a Notificação Push via satélite!
+    // 💡 CORRIGIDO: Utiliza a versão mais recente "sendEachForMulticast"
     const response = await admin.messaging().sendEachForMulticast(payload);
 
     return res.status(200).json({
