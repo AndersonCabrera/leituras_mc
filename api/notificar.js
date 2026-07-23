@@ -1,16 +1,8 @@
 const admin = require('firebase-admin');
 
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') : undefined,
-    })
-  });
-}
-
 module.exports = async (req, res) => {
+  // 1. Sempre enviar os cabeçalhos de CORS primeiro! 
+  // Isso impede que o Flutter Web mostre o erro genérico "Failed to fetch"
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'OPTIONS, POST');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -24,6 +16,18 @@ module.exports = async (req, res) => {
   }
 
   try {
+    // 2. Tentar ligar ao Firebase DENTRO do try/catch para apanharmos erros na chave
+    if (!admin.apps.length) {
+      admin.initializeApp({
+        credential: admin.credential.cert({
+          projectId: process.env.FIREBASE_PROJECT_ID,
+          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+          // Garante que o sistema processa bem as quebras de linha da chave secreta
+          privateKey: process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') : undefined,
+        })
+      });
+    }
+
     const { titulo, mensagem, destinatario_id, id_administradora } = req.body;
 
     if (!titulo || !mensagem || !id_administradora) {
@@ -33,7 +37,6 @@ module.exports = async (req, res) => {
     let tokens = [];
 
     if (destinatario_id === 'todos' || !destinatario_id) {
-      // 💡 CORRIGIDO: Agora filtra para enviar notificações apenas à equipa desta empresa específica!
       const usersSnap = await admin.firestore().collection('usuarios')
         .where('cargo', '==', 'leiturista')
         .where('id_administradora', '==', id_administradora)
@@ -61,7 +64,6 @@ module.exports = async (req, res) => {
       }
     };
 
-    // 💡 CORRIGIDO: Utiliza a versão mais recente "sendEachForMulticast"
     const response = await admin.messaging().sendEachForMulticast(payload);
 
     return res.status(200).json({
@@ -72,6 +74,7 @@ module.exports = async (req, res) => {
 
   } catch (error) {
     console.error('Erro no Robô da Vercel:', error);
-    return res.status(500).json({ error: 'Erro interno no servidor.', details: error.message });
+    // Se a chave do Firebase estiver errada, o erro vai finalmente aparecer no telemóvel!
+    return res.status(500).json({ error: 'Erro interno no servidor Vercel.', details: error.message });
   }
 };
