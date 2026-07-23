@@ -19,7 +19,8 @@ class _TelaEnviarNotificacaoState extends State<TelaEnviarNotificacao> {
   List<Map<String, dynamic>> _leituristas = [];
   String _leituristaSelecionado = 'todos';
 
-  final String _vercelApiUrl = "https://leituras-mc.vercel.app/api/notificar";
+  // Cole aqui o seu link PERMANENTE da Vercel, mantendo o /api/notificar no final
+  final String _vercelApiUrl = 'https://leituras-mc.vercel.app/api/notificar';
 
   @override
   void initState() {
