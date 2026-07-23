@@ -14,15 +14,15 @@ class NotificacaoService {
     try {
       String? token = await _messaging.getToken();
       if (token != null) {
-        await FirebaseFirestore.instance
-            .collection('usuarios')
-            .doc(userId)
-            .set({
-              'fcm_token': token,
-              'id_administradora': idAdmin,
-              'cargo': cargo,
-              'ultimo_login': FieldValue.serverTimestamp(),
-            }, SetOptions(merge: true));
+        await FirebaseFirestore.instance.collection('usuarios').doc(userId).set(
+          {
+            'fcm_token': token,
+            'id_administradora': idAdmin,
+            'cargo': cargo, // Garante que a Vercel sabe quem é leiturista
+            'ultimo_login': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true),
+        );
         debugPrint(
           '🔔 Token FCM guardado com sucesso para o utilizador $userId',
         );
