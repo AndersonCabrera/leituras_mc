@@ -1,5 +1,6 @@
 const admin = require('firebase-admin');
 const https = require('https');
+const crypto = require('crypto');
 
 function mpRequest(body) {
   return new Promise((resolve, reject) => {
@@ -12,6 +13,7 @@ function mpRequest(body) {
         Authorization: `Bearer ${process.env.MP_ACCESS_TOKEN}`,
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(data),
+        'X-Idempotency-Key': crypto.randomUUID(),
       },
     };
     const req = https.request(options, (res) => {

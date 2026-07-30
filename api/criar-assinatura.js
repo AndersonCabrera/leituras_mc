@@ -1,5 +1,6 @@
 const admin = require('firebase-admin');
 const https = require('https');
+const crypto = require('crypto');
 
 function mpRequest(method, path, body) {
   return new Promise((resolve, reject) => {
@@ -13,7 +14,10 @@ function mpRequest(method, path, body) {
         'Content-Type': 'application/json',
       },
     };
-    if (data) options.headers['Content-Length'] = Buffer.byteLength(data);
+    if (data) {
+      options.headers['Content-Length'] = Buffer.byteLength(data);
+      options.headers['X-Idempotency-Key'] = crypto.randomUUID();
+    }
     const req = https.request(options, (res) => {
       let chunks = [];
       res.on('data', (c) => chunks.push(c));
