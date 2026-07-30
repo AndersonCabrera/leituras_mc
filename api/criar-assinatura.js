@@ -87,7 +87,7 @@ module.exports = async (req, res) => {
         transaction_amount: precos[plano],
         currency_id: 'BRL',
       },
-      back_url: 'https://leituras-mc.vercel.app/pagamento/retorno',
+      back_url: 'https://leituras-mc.vercel.app/api/retorno-pagamento',
       status: 'pending',
     });
 

@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/plano.dart';
 import '../../services/mercadopago_service.dart';
+import 'tela_status_assinatura.dart';
 
 class TelaPlanos extends StatefulWidget {
   final String idAdministradora;
@@ -24,6 +27,8 @@ class TelaPlanos extends StatefulWidget {
 
 class _TelaPlanosState extends State<TelaPlanos> {
   bool _carregando = false;
+
+  Timer? _pollTimer;
 
   Future<void> _assinar(Plano plano) async {
     setState(() => _carregando = true);
@@ -63,9 +68,32 @@ class _TelaPlanosState extends State<TelaPlanos> {
           }
         }
       }
+
+      _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
+        final status = await MercadoPagoService.verificarStatus(
+          idAdministradora: widget.idAdministradora,
+        );
+        if (status['status'] == 'active' && mounted) {
+          _pollTimer?.cancel();
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => TelaStatusAssinatura(
+                idAdministradora: widget.idAdministradora,
+              ),
+            ),
+          );
+        }
+      });
     } finally {
       setState(() => _carregando = false);
     }
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
   }
 
   @override
