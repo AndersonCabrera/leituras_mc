@@ -78,7 +78,7 @@ module.exports = async (req, res) => {
     const assinatura = assinaturaDoc.data();
     const faturas = (assinatura.faturas || []).map((f) => {
       if (f.id_mp === paymentId) {
-        return { ...f, status: payment.status, data_pagamento: admin.firestore.FieldValue.serverTimestamp() };
+        return { ...f, status: payment.status, data_pagamento: new Date() };
       }
       return f;
     });

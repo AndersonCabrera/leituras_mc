@@ -125,7 +125,7 @@ module.exports = async (req, res) => {
         status: mpBody.status,
         valor: precos[plano],
         data_vencimento: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
-        data_criacao: admin.firestore.FieldValue.serverTimestamp(),
+        data_criacao: new Date(),
       }],
     }, { merge: true });
 
