@@ -38,13 +38,14 @@ module.exports = async (req, res) => {
       body: {
         reason: nomes[plano],
         payer_email: email,
+        external_reference: id_administradora,
         auto_recurring: {
           frequency: 1,
           frequency_type: 'months',
           transaction_amount: precos[plano],
           currency_id: 'BRL',
         },
-        back_url: 'leituras-mc://pagamento/retorno',
+        back_url: 'https://leituras-mc.vercel.app/pagamento/retorno',
         status: 'pending',
       },
     });
