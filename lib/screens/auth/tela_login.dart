@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../leiturista/tela_condominios.dart';
 import '../admin/tela_admin_dashboard.dart';
 import '../super_admin/tela_super_admin_dashboard.dart';
+import 'tela_registro_admin.dart';
 import '../../core/theme.dart';
 import '../../services/notificacao_service.dart';
 
@@ -218,6 +219,34 @@ class _EcraLoginState extends State<EcraLogin> {
                           'Entrar',
                           style: TextStyle(fontSize: 18, color: Colors.white),
                         ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: OutlinedButton(
+                  onPressed: carregando
+                      ? null
+                      : () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) =>
+                                  const TelaRegistroAdmin(),
+                            ),
+                          );
+                        },
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Color(0xFF0D47A1)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  child: const Text(
+                    'Criar Conta — Trial Grátis 60 Dias',
+                    style: TextStyle(fontSize: 16),
+                  ),
                 ),
               ),
             ],
