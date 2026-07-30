@@ -1,9 +1,5 @@
-const mercadopago = require('mercadopago');
+const { MercadoPagoConfig, PreApproval } = require('mercadopago');
 const admin = require('firebase-admin');
-
-mercadopago.configure({
-  access_token: process.env.MP_ACCESS_TOKEN,
-});
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -48,7 +44,11 @@ module.exports = async (req, res) => {
     const mpId = assinatura?.id_mercadopago;
 
     if (mpId) {
-      await mercadopago.preapproval.update({
+      const client = new MercadoPagoConfig({
+        accessToken: process.env.MP_ACCESS_TOKEN,
+      });
+      const preApproval = new PreApproval(client);
+      await preApproval.update({
         id: mpId,
         body: { status: 'cancelled' },
       });

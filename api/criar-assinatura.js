@@ -1,9 +1,5 @@
-const mercadopago = require('mercadopago');
+const { MercadoPagoConfig, PreApproval } = require('mercadopago');
 const admin = require('firebase-admin');
-
-mercadopago.configure({
-  access_token: process.env.MP_ACCESS_TOKEN,
-});
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -34,21 +30,22 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: 'Plano inválido.' });
     }
 
-    const preapproval = await mercadopago.preapproval.create({
+    const client = new MercadoPagoConfig({
+      accessToken: process.env.MP_ACCESS_TOKEN,
+    });
+    const preApproval = new PreApproval(client);
+
+    const result = await preApproval.create({
       body: {
         reason: nomes[plano],
+        payer_email: email,
         auto_recurring: {
           frequency: 1,
           frequency_type: 'months',
           transaction_amount: precos[plano],
           currency_id: 'BRL',
         },
-        payer_email: email,
-        back_url: {
-          success: 'leituras-mc://pagamento/sucesso',
-          pending: 'leituras-mc://pagamento/pendente',
-          failure: 'leituras-mc://pagamento/erro',
-        },
+        back_url: 'leituras-mc://pagamento/retorno',
         status: 'pending',
       },
     });
@@ -70,8 +67,8 @@ module.exports = async (req, res) => {
         id_administradora,
         plano,
         status: 'pending',
-        id_mercadopago: preapproval.body.id,
-        status_mercadopago: preapproval.body.status,
+        id_mercadopago: result.id,
+        status_mercadopago: result.status,
         data_inicio: admin.firestore.FieldValue.serverTimestamp(),
         nome_empresa,
         email_admin: email,
@@ -80,9 +77,9 @@ module.exports = async (req, res) => {
     );
 
     return res.status(200).json({
-      url: preapproval.body.init_point,
-      id_assinatura: preapproval.body.id,
-      status: preapproval.body.status,
+      url: result.init_point,
+      id_assinatura: result.id,
+      status: result.status,
     });
   } catch (error) {
     console.error('Erro ao criar assinatura:', error);
