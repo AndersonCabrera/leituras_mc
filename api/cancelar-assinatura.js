@@ -1,4 +1,3 @@
-const { PreApproval } = require('mercadopago');
 const admin = require('firebase-admin');
 
 module.exports = async (req, res) => {
@@ -44,13 +43,19 @@ module.exports = async (req, res) => {
     const mpId = assinatura?.id_mercadopago;
 
     if (mpId) {
-      const preApproval = new PreApproval({
-        accessToken: process.env.MP_ACCESS_TOKEN,
+      const mpRes = await fetch(`https://api.mercadopago.com/preapproval/${mpId}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${process.env.MP_ACCESS_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ status: 'cancelled' }),
       });
-      await preApproval.update({
-        id: mpId,
-        body: { status: 'cancelled' },
-      });
+
+      if (!mpRes.ok) {
+        const err = await mpRes.json();
+        console.error('Erro MP ao cancelar:', err);
+      }
     }
 
     await admin.firestore().collection('assinaturas').doc(id_administradora).update({
