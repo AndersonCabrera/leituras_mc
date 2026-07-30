@@ -6,7 +6,8 @@ import '../auth/tela_login.dart';
 import 'tela_cadastro_administradora.dart';
 import 'tela_criar_acesso_cliente.dart';
 import 'tela_importacao_massa.dart';
-import '../../core/theme.dart'; // 💡 IMPORTAÇÃO DO TEMA
+import '../../models/plano.dart';
+import '../../core/theme.dart';
 
 class TelaSuperAdminDashboard extends StatefulWidget {
   const TelaSuperAdminDashboard({super.key});
@@ -31,7 +32,6 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
   Widget build(BuildContext context) {
     bool isDark = Theme.of(context).brightness == Brightness.dark;
 
-    // Cores dinâmicas que respeitam o tema
     Color azulEscuro = isDark
         ? Colors.blueGrey.shade900
         : const Color(0xFF0A192F);
@@ -46,16 +46,12 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
       appBar: AppBar(
         title: const Text(
           'Painel Master SaaS',
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w600,
-            fontSize: 18,
-          ),
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 18),
         ),
         backgroundColor: azulEscuro,
         elevation: 0,
         actions: [
-          const BotaoTrocaTema(corIcone: Colors.white), // 💡 BOTÃO AQUI!
+          const BotaoTrocaTema(corIcone: Colors.white),
           IconButton(
             icon: const Icon(Icons.logout_rounded, color: Colors.white),
             tooltip: 'Sair do Sistema',
@@ -106,17 +102,12 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
                   ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.only(
-                    top: 85,
-                    left: 16,
-                    right: 16,
-                    bottom: 20,
-                  ),
+                  padding: const EdgeInsets.only(top: 85, left: 16, right: 16, bottom: 20),
                   child: Row(
                     children: [
                       Expanded(
                         child: _kpiCard(
-                          context, // Adicionado context para ler o tema
+                          context,
                           'Empresas',
                           Icons.domain_rounded,
                           azul,
@@ -128,7 +119,7 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: _kpiCard(
-                          context, // Adicionado context para ler o tema
+                          context,
                           'Gestores',
                           Icons.admin_panel_settings_rounded,
                           Colors.amber.shade700,
@@ -165,8 +156,8 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
                         totalApartamentos +=
                             (dados['apartamentos'] as List).length;
                       } else if (dados['apartamentos'] is num) {
-                        totalApartamentos += (dados['apartamentos'] as num)
-                            .toInt();
+                        totalApartamentos +=
+                            (dados['apartamentos'] as num).toInt();
                       }
                     }
                   }
@@ -200,8 +191,7 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
                   }
 
                   var dadosOperacao =
-                      snapshot.data ??
-                      {'total': 0, 'concluidas': 0, 'porcentagem': 0.0};
+                      snapshot.data ?? {'total': 0, 'concluidas': 0, 'porcentagem': 0.0};
                   double pctValor = dadosOperacao['porcentagem'] as double;
                   int pctTexto = (pctValor * 100).toInt();
 
@@ -245,9 +235,8 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
                         const SizedBox(height: 10),
                         LinearProgressIndicator(
                           value: pctValor,
-                          backgroundColor: isDark
-                              ? Colors.grey.shade800
-                              : Colors.grey.shade200,
+                          backgroundColor:
+                              isDark ? Colors.grey.shade800 : Colors.grey.shade200,
                           color: pctTexto == 100
                               ? Colors.green.shade600
                               : Colors.blue.shade600,
@@ -395,9 +384,7 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
                         Icon(
                           Icons.business_center_rounded,
                           size: 60,
-                          color: isDark
-                              ? Colors.grey.shade800
-                              : Colors.grey.shade300,
+                          color: isDark ? Colors.grey.shade800 : Colors.grey.shade300,
                         ),
                         const SizedBox(height: 15),
                         Text(
@@ -415,18 +402,36 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
               }
 
               return SliverPadding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 0,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 0),
                 sliver: SliverList(
                   delegate: SliverChildBuilderDelegate((context, index) {
                     var doc = snapshot.data!.docs[index];
                     var adminData = doc.data() as Map<String, dynamic>;
                     String nome = adminData['nome_empresa'] ?? 'Empresa';
-                    String inicial = nome.isNotEmpty
-                        ? nome[0].toUpperCase()
-                        : 'E';
+                    String inicial = nome.isNotEmpty ? nome[0].toUpperCase() : 'E';
+                    String planoId = adminData['plano'] ?? 'gratis';
+                    String statusAss = adminData['status_assinatura'] ?? 'trial';
+                    var plano = Plano.fromId(planoId);
+
+                    Color corStatus;
+                    String statusTexto;
+                    switch (statusAss) {
+                      case 'active':
+                        corStatus = Colors.green;
+                        statusTexto = 'Ativo';
+                        break;
+                      case 'trial':
+                        corStatus = Colors.orange;
+                        statusTexto = 'Trial';
+                        break;
+                      case 'past_due':
+                        corStatus = Colors.red;
+                        statusTexto = 'Inadimplente';
+                        break;
+                      default:
+                        corStatus = Colors.grey;
+                        statusTexto = 'Inativo';
+                    }
 
                     return Container(
                       margin: const EdgeInsets.only(bottom: 15),
@@ -445,12 +450,8 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
                       child: Column(
                         children: [
                           ListTile(
-                            contentPadding: const EdgeInsets.fromLTRB(
-                              16,
-                              16,
-                              16,
-                              0,
-                            ),
+                            contentPadding:
+                                const EdgeInsets.fromLTRB(16, 16, 16, 0),
                             leading: Container(
                               width: 50,
                               height: 50,
@@ -462,9 +463,7 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
                                 child: Text(
                                   inicial,
                                   style: TextStyle(
-                                    color: isDark
-                                        ? Colors.blue.shade300
-                                        : azulEscuro,
+                                    color: isDark ? Colors.blue.shade300 : azulEscuro,
                                     fontSize: 22,
                                     fontWeight: FontWeight.bold,
                                   ),
@@ -479,17 +478,60 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
                                 color: corTextoTitulo,
                               ),
                             ),
-                            subtitle: Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: Text(
-                                'CNPJ: ${adminData['cnpj'] ?? 'Não informado'}',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: isDark
-                                      ? Colors.grey.shade400
-                                      : Colors.grey.shade600,
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 4),
+                                  child: Text(
+                                    'CNPJ: ${adminData['cnpj'] ?? 'Não informado'}',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: isDark
+                                          ? Colors.grey.shade400
+                                          : Colors.grey.shade600,
+                                    ),
+                                  ),
                                 ),
-                              ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: corStatus.withOpacity(0.15),
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: Text(
+                                        plano.nome,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: corStatus,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: corStatus.withOpacity(0.15),
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: Text(
+                                        statusTexto,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: corStatus,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
                             ),
                           ),
                           Padding(
@@ -504,9 +546,7 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
                                     ),
                                     label: const Text(
                                       'Criar Acesso',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                      ),
+                                      style: TextStyle(fontWeight: FontWeight.bold),
                                     ),
                                     style: OutlinedButton.styleFrom(
                                       foregroundColor: isDark
@@ -514,17 +554,13 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
                                           : azul,
                                       side: BorderSide(
                                         color: isDark
-                                            ? Colors.blue.shade300.withOpacity(
-                                                0.5,
-                                              )
+                                            ? Colors.blue.shade300.withOpacity(0.5)
                                             : azul.withOpacity(0.5),
                                       ),
                                       shape: RoundedRectangleBorder(
                                         borderRadius: BorderRadius.circular(10),
                                       ),
-                                      padding: const EdgeInsets.symmetric(
-                                        vertical: 12,
-                                      ),
+                                      padding: const EdgeInsets.symmetric(vertical: 12),
                                     ),
                                     onPressed: () {
                                       Navigator.push(
@@ -560,9 +596,8 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
                                       shape: RoundedRectangleBorder(
                                         borderRadius: BorderRadius.circular(10),
                                       ),
-                                      padding: const EdgeInsets.symmetric(
-                                        vertical: 12,
-                                      ),
+                                      padding:
+                                          const EdgeInsets.symmetric(vertical: 12),
                                       elevation: 0,
                                     ),
                                     onPressed: () =>
@@ -619,10 +654,8 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
             stream: stream,
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting)
-                return const Text(
-                  '...',
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                );
+                return const Text('...',
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold));
               int count = snapshot.data?.docs.length ?? 0;
               return Text(
                 count.toString(),
@@ -635,14 +668,9 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
             },
           ),
           const SizedBox(height: 4),
-          Text(
-            titulo,
-            style: const TextStyle(
-              fontSize: 13,
-              color: Colors.grey,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
+          Text(titulo,
+              style: const TextStyle(
+                  fontSize: 13, color: Colors.grey, fontWeight: FontWeight.w500)),
         ],
       ),
     );

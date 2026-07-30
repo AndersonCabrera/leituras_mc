@@ -34,12 +34,25 @@ class _TelaCadastroAdministradoraState
     });
 
     try {
-      await FirebaseFirestore.instance.collection('administradoras').add({
+      var docRef = await FirebaseFirestore.instance.collection('administradoras').add({
         'nome_empresa': nomeController.text.trim(),
         'cnpj': cnpjController.text.trim(),
         'data_cadastro': FieldValue.serverTimestamp(),
         'status': 'ativo',
+        'plano': 'gratis',
+        'status_assinatura': 'trial',
+        'data_inicio_trial': FieldValue.serverTimestamp(),
+        'data_fim_trial': DateTime.now().add(const Duration(days: 90)),
       });
+
+      await FirebaseFirestore.instance.collection('assinaturas').doc(docRef.id).set({
+        'id_administradora': docRef.id,
+        'plano': 'gratis',
+        'status': 'trial',
+        'data_inicio_trial': FieldValue.serverTimestamp(),
+        'data_fim_trial': DateTime.now().add(const Duration(days: 90)),
+      });
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(

@@ -3,6 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../../models/plano.dart';
+
 class TelaListaEquipe extends StatelessWidget {
   final String idAdministradora;
   const TelaListaEquipe({super.key, required this.idAdministradora});
@@ -105,22 +107,79 @@ class TelaListaEquipe extends StatelessWidget {
           );
         },
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: Colors.green.shade700,
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) =>
-                  TelaCadastroLeiturista(idAdministradora: idAdministradora),
-            ),
+      floatingActionButton: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('usuarios')
+            .where('id_administradora', isEqualTo: idAdministradora)
+            .where('cargo', isEqualTo: 'leiturista')
+            .snapshots(),
+        builder: (context, snapshotLeit) {
+          return FutureBuilder<DocumentSnapshot>(
+            future: FirebaseFirestore.instance
+                .collection('administradoras')
+                .doc(idAdministradora)
+                .get(),
+            builder: (context, snapshotAdm) {
+              var dadosAdm = snapshotAdm.data?.data() as Map<String, dynamic>?;
+              var planoId = dadosAdm?['plano'] ?? 'gratis';
+              var plano = Plano.fromId(planoId);
+              var qtdAtual = snapshotLeit.data?.docs.length ?? 0;
+              var atingiuLimite = !plano.ilimitadoLeituristas && qtdAtual >= plano.limiteLeituristas;
+
+              return FloatingActionButton.extended(
+                backgroundColor: atingiuLimite ? Colors.grey : Colors.green.shade700,
+                onPressed: () {
+                  if (atingiuLimite) {
+                    _mostrarLimiteAtingido(context);
+                    return;
+                  }
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          TelaCadastroLeiturista(idAdministradora: idAdministradora),
+                    ),
+                  );
+                },
+                icon: Icon(
+                  atingiuLimite ? Icons.lock_rounded : Icons.person_add_rounded,
+                  color: Colors.white,
+                ),
+                label: Text(
+                  atingiuLimite ? 'Limite do Plano' : 'Novo Leiturista',
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                ),
+              );
+            },
           );
         },
-        icon: const Icon(Icons.person_add_rounded, color: Colors.white),
-        label: const Text(
-          "Novo Leiturista",
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+
+  void _mostrarLimiteAtingido(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.cloud_off_rounded, color: Colors.orange, size: 28),
+            SizedBox(width: 10),
+            Text('Limite Atingido', style: TextStyle(fontWeight: FontWeight.bold)),
+          ],
         ),
+        content: const Text(
+          'Você atingiu o limite de leituristas do seu plano atual. '
+          'Faça um upgrade para cadastrar mais.',
+          style: TextStyle(fontSize: 15),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
       ),
     );
   }

@@ -1,0 +1,51 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSuperAdmin() {
+      return request.auth != null &&
+        get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.cargo == 'super_admin';
+    }
+
+    function isAdminDaEmpresa(empresaId) {
+      return request.auth != null &&
+        get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.id_administradora == empresaId;
+    }
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    match /assinaturas/{idAdministradora} {
+      allow read: if isAuthenticated() && (isAdminDaEmpresa(idAdministradora) || isSuperAdmin());
+      allow write: if isSuperAdmin();
+    }
+
+    match /pagamentos/{pagamentoId} {
+      allow read: if isAuthenticated();
+      allow write: if isSuperAdmin();
+    }
+
+    match /administradoras/{idAdministradora} {
+      allow read: if isAuthenticated() && (isAdminDaEmpresa(idAdministradora) || isSuperAdmin());
+      allow write: if isSuperAdmin();
+    }
+
+    match /usuarios/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin());
+    }
+
+    match /predios/{predioId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /leituras/{leituraId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /notificacoes_enviadas/{notificacaoId} {
+      allow read, write: if isAuthenticated();
+    }
+  }
+}

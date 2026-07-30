@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../models/plano.dart';
+
 // TELA PRINCIPAL DE LISTAGEM
 class TelaGestaoPredios extends StatelessWidget {
   final String adminId;
@@ -85,18 +87,75 @@ class TelaGestaoPredios extends StatelessWidget {
           );
         },
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: theme.colorScheme.primary,
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => TelaCadastroPredio(adminId: adminId),
-            ),
+      floatingActionButton: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('predios')
+            .where('admin_id', isEqualTo: adminId)
+            .snapshots(),
+        builder: (context, snapshotPredios) {
+          return FutureBuilder<DocumentSnapshot>(
+            future: FirebaseFirestore.instance
+                .collection('administradoras')
+                .doc(adminId)
+                .get(),
+            builder: (context, snapshotAdm) {
+              var dadosAdm = snapshotAdm.data?.data() as Map<String, dynamic>?;
+              var planoId = dadosAdm?['plano'] ?? 'gratis';
+              var plano = Plano.fromId(planoId);
+              var qtdAtual = snapshotPredios.data?.docs.length ?? 0;
+              var atingiuLimite = !plano.ilimitadoCondominios && qtdAtual >= plano.limiteCondominios;
+
+              return FloatingActionButton.extended(
+                backgroundColor: atingiuLimite ? Colors.grey : theme.colorScheme.primary,
+                onPressed: () {
+                  if (atingiuLimite) {
+                    _mostrarLimiteAtingido(context, plano.nome, 'condomínios');
+                    return;
+                  }
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => TelaCadastroPredio(adminId: adminId),
+                    ),
+                  );
+                },
+                icon: Icon(atingiuLimite ? Icons.lock_rounded : Icons.add, color: Colors.white),
+                label: Text(
+                  atingiuLimite ? 'Limite do Plano' : 'Novo Prédio',
+                  style: const TextStyle(color: Colors.white),
+                ),
+              );
+            },
           );
         },
-        icon: const Icon(Icons.add, color: Colors.white),
-        label: const Text('Novo Prédio', style: TextStyle(color: Colors.white)),
+      ),
+    );
+  }
+
+  void _mostrarLimiteAtingido(
+      BuildContext context, String planoNome, String recurso) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.cloud_off_rounded, color: Colors.orange, size: 28),
+            SizedBox(width: 10),
+            Text('Limite Atingido', style: TextStyle(fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: const Text(
+          'Você atingiu o limite de condomínios do seu plano atual. '
+          'Faça um upgrade para cadastrar mais.',
+          style: TextStyle(fontSize: 15),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
       ),
     );
   }

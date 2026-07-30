@@ -11,6 +11,8 @@ import 'package:universal_html/html.dart' as html;
 import 'dart:io' as io;
 import 'package:flutter/services.dart' show ByteData, rootBundle;
 
+import '../../models/plano.dart';
+
 class TelaRelatoriosBusca extends StatefulWidget {
   final String idAdministradora;
   const TelaRelatoriosBusca({super.key, required this.idAdministradora});
@@ -904,41 +906,73 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
                         fontSize: 16,
                       ),
                     ),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        ElevatedButton.icon(
-                          icon: const Icon(
-                            Icons.picture_as_pdf,
-                            color: Colors.white,
-                          ),
-                          label: const Text(
-                            'Laudo (PDF)',
-                            style: TextStyle(color: Colors.white),
-                          ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.red.shade700,
-                          ),
-                          onPressed: () =>
-                              _exportarParaPDF(context, leiturasFiltradas),
-                        ),
-                        const SizedBox(width: 10),
-                        ElevatedButton.icon(
-                          icon: const Icon(
-                            Icons.table_view,
-                            color: Colors.white,
-                          ),
-                          label: const Text(
-                            'Exportar Excel',
-                            style: TextStyle(color: Colors.white),
-                          ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green.shade700,
-                          ),
-                          onPressed: () =>
-                              _exportarParaExcel(context, leiturasFiltradas),
-                        ),
-                      ],
+                    FutureBuilder<DocumentSnapshot>(
+                      future: FirebaseFirestore.instance
+                          .collection('administradoras')
+                          .doc(widget.idAdministradora)
+                          .get(),
+                      builder: (context, snapshotAdm) {
+                        var dadosAdm =
+                            snapshotAdm.data?.data() as Map<String, dynamic>?;
+                        var planoId = dadosAdm?['plano'] ?? 'gratis';
+                        var plano = Plano.fromId(planoId);
+                        var podeExportar = plano.relatoriosPersonalizados ||
+                            dadosAdm?['status_assinatura'] == 'trial';
+
+                        return Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (podeExportar) ...[
+                              ElevatedButton.icon(
+                                icon: const Icon(
+                                  Icons.picture_as_pdf,
+                                  color: Colors.white,
+                                ),
+                                label: const Text(
+                                  'Laudo (PDF)',
+                                  style: TextStyle(color: Colors.white),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.red.shade700,
+                                ),
+                                onPressed: () =>
+                                    _exportarParaPDF(context, leiturasFiltradas),
+                              ),
+                              const SizedBox(width: 10),
+                              ElevatedButton.icon(
+                                icon: const Icon(
+                                  Icons.table_view,
+                                  color: Colors.white,
+                                ),
+                                label: const Text(
+                                  'Exportar Excel',
+                                  style: TextStyle(color: Colors.white),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.green.shade700,
+                                ),
+                                onPressed: () =>
+                                    _exportarParaExcel(context, leiturasFiltradas),
+                              ),
+                            ] else ...[
+                              OutlinedButton.icon(
+                                icon: const Icon(
+                                  Icons.lock_rounded,
+                                  color: Colors.orange,
+                                ),
+                                label: const Text(
+                                  'Upgrade para Exportar',
+                                  style: TextStyle(color: Colors.orange),
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  side: BorderSide(color: Colors.orange.shade300),
+                                ),
+                                onPressed: () => _mostrarUpgradeRelatorios(context),
+                              ),
+                            ],
+                          ],
+                        );
+                      },
                     ),
                   ],
                 ),
@@ -1001,6 +1035,33 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
             ],
           );
         },
+      ),
+    );
+  }
+
+  void _mostrarUpgradeRelatorios(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.lock_rounded, color: Colors.orange, size: 28),
+            SizedBox(width: 10),
+            Text('Recurso Premium', style: TextStyle(fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: const Text(
+          'A exportação de relatórios em PDF e Excel está disponível '
+          'nos planos Premium e Super Premium. Faça um upgrade para liberar!',
+          style: TextStyle(fontSize: 15),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
       ),
     );
   }
