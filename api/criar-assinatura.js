@@ -1,4 +1,4 @@
-const { MercadoPagoConfig, PreApproval } = require('mercadopago');
+const { PreApproval } = require('mercadopago');
 const admin = require('firebase-admin');
 
 module.exports = async (req, res) => {
@@ -30,10 +30,9 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: 'Plano inválido.' });
     }
 
-    const client = new MercadoPagoConfig({
+    const preApproval = new PreApproval({
       accessToken: process.env.MP_ACCESS_TOKEN,
     });
-    const preApproval = new PreApproval(client);
 
     const result = await preApproval.create({
       body: {

@@ -52,3 +52,6 @@ ios/Runner/GoogleService-Info.plist
 # Chaves de Assinatura Android (Segurança)
 android/key.properties
 android/app/upload-keystore.jks
+
+# Node.js (Vercel API)
+node_modules/
