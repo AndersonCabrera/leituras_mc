@@ -1,4 +1,3 @@
-const { PreApproval } = require('mercadopago');
 const admin = require('firebase-admin');
 
 module.exports = async (req, res) => {
@@ -30,25 +29,37 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: 'Plano inválido.' });
     }
 
-    const preApproval = new PreApproval({
-      accessToken: process.env.MP_ACCESS_TOKEN,
+    const body = {
+      reason: nomes[plano],
+      payer_email: email,
+      external_reference: id_administradora,
+      auto_recurring: {
+        frequency: 1,
+        frequency_type: 'months',
+        transaction_amount: precos[plano],
+        currency_id: 'BRL',
+      },
+      back_url: 'https://leituras-mc.vercel.app/pagamento/retorno',
+      status: 'pending',
+    };
+
+    const mpRes = await fetch('https://api.mercadopago.com/preapproval/', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.MP_ACCESS_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
     });
 
-    const result = await preApproval.create({
-      body: {
-        reason: nomes[plano],
-        payer_email: email,
-        external_reference: id_administradora,
-        auto_recurring: {
-          frequency: 1,
-          frequency_type: 'months',
-          transaction_amount: precos[plano],
-          currency_id: 'BRL',
-        },
-        back_url: 'https://leituras-mc.vercel.app/pagamento/retorno',
-        status: 'pending',
-      },
-    });
+    const result = await mpRes.json();
+
+    if (!mpRes.ok) {
+      return res.status(500).json({
+        error: 'Erro ao criar assinatura no Mercado Pago.',
+        details: result.message || JSON.stringify(result),
+      });
+    }
 
     if (!admin.apps.length) {
       admin.initializeApp({
