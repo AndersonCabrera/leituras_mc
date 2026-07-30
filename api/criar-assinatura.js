@@ -1,4 +1,36 @@
 const admin = require('firebase-admin');
+const https = require('https');
+
+function mpRequest(body) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(body);
+    const options = {
+      hostname: 'api.mercadopago.com',
+      path: '/preapproval/',
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.MP_ACCESS_TOKEN}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(data),
+      },
+    };
+    const req = https.request(options, (res) => {
+      let chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString();
+        try {
+          resolve({ status: res.statusCode, body: JSON.parse(text) });
+        } catch {
+          resolve({ status: res.statusCode, body: { raw: text } });
+        }
+      });
+    });
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
+}
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -29,7 +61,7 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: 'Plano inválido.' });
     }
 
-    const body = {
+    const { status: mpStatus, body: mpBody } = await mpRequest({
       reason: nomes[plano],
       payer_email: email,
       external_reference: id_administradora,
@@ -41,30 +73,13 @@ module.exports = async (req, res) => {
       },
       back_url: 'https://leituras-mc.vercel.app/pagamento/retorno',
       status: 'pending',
-    };
-
-    console.log('Token (primeiros 20 chars):', process.env.MP_ACCESS_TOKEN?.substring(0, 20));
-    console.log('Body enviado:', JSON.stringify(body));
-
-    const mpRes = await fetch('https://api.mercadopago.com/preapproval/', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.MP_ACCESS_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
     });
 
-    const result = await mpRes.json();
-
-    console.log('Status MP:', mpRes.status);
-    console.log('Resposta MP:', JSON.stringify(result));
-
-    if (!mpRes.ok) {
+    if (mpStatus !== 200 && mpStatus !== 201) {
       return res.status(500).json({
-        error: 'Erro MP.',
-        details: JSON.stringify(result),
-        status_mp: mpRes.status,
+        error: 'Erro MP',
+        status_mp: mpStatus,
+        details: mpBody,
       });
     }
 
@@ -85,8 +100,8 @@ module.exports = async (req, res) => {
         id_administradora,
         plano,
         status: 'pending',
-        id_mercadopago: result.id,
-        status_mercadopago: result.status,
+        id_mercadopago: mpBody.id,
+        status_mercadopago: mpBody.status,
         data_inicio: admin.firestore.FieldValue.serverTimestamp(),
         nome_empresa,
         email_admin: email,
@@ -95,15 +110,16 @@ module.exports = async (req, res) => {
     );
 
     return res.status(200).json({
-      url: result.init_point,
-      id_assinatura: result.id,
-      status: result.status,
+      url: mpBody.init_point,
+      id_assinatura: mpBody.id,
+      status: mpBody.status,
     });
   } catch (error) {
-    console.error('Erro ao criar assinatura:', error);
+    console.error('Erro:', error);
     return res.status(500).json({
-      error: 'Erro ao criar assinatura no Mercado Pago.',
+      error: 'Erro inesperado',
       details: error.message,
+      stack: error.stack,
     });
   }
 };
