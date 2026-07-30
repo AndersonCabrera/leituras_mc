@@ -32,6 +32,21 @@ function mpRequest(body) {
   });
 }
 
+function parseBody(req) {
+  return new Promise((resolve, reject) => {
+    let chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString()));
+      } catch (e) {
+        reject(new Error('Body inválido: ' + e.message));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'OPTIONS, POST');
@@ -43,7 +58,8 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const { id_administradora, plano, email, nome_empresa } = req.body;
+    const bodyData = await parseBody(req);
+    const { id_administradora, plano, email, nome_empresa } = bodyData;
 
     if (!id_administradora || !plano || !email) {
       return res.status(400).json({
