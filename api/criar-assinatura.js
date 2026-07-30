@@ -43,6 +43,9 @@ module.exports = async (req, res) => {
       status: 'pending',
     };
 
+    console.log('Token (primeiros 20 chars):', process.env.MP_ACCESS_TOKEN?.substring(0, 20));
+    console.log('Body enviado:', JSON.stringify(body));
+
     const mpRes = await fetch('https://api.mercadopago.com/preapproval/', {
       method: 'POST',
       headers: {
@@ -54,10 +57,14 @@ module.exports = async (req, res) => {
 
     const result = await mpRes.json();
 
+    console.log('Status MP:', mpRes.status);
+    console.log('Resposta MP:', JSON.stringify(result));
+
     if (!mpRes.ok) {
       return res.status(500).json({
-        error: 'Erro ao criar assinatura no Mercado Pago.',
-        details: result.message || JSON.stringify(result),
+        error: 'Erro MP.',
+        details: JSON.stringify(result),
+        status_mp: mpRes.status,
       });
     }
 
