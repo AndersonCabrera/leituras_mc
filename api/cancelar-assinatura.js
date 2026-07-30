@@ -1,5 +1,20 @@
 const admin = require('firebase-admin');
 
+function parseBody(req) {
+  return new Promise((resolve, reject) => {
+    let chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString()));
+      } catch (e) {
+        reject(new Error('Body inválido: ' + e.message));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'OPTIONS, POST');
@@ -11,7 +26,8 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const { id_administradora } = req.body;
+    const bodyData = await parseBody(req);
+    const { id_administradora } = bodyData;
 
     if (!id_administradora) {
       return res.status(400).json({ error: 'id_administradora obrigatório.' });
