@@ -1,4 +1,30 @@
 const admin = require('firebase-admin');
+const https = require('https');
+
+function mpGet(path) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'api.mercadopago.com',
+      path,
+      method: 'GET',
+      headers: { Authorization: `Bearer ${process.env.MP_ACCESS_TOKEN}` },
+    };
+    const req = https.request(options, (res) => {
+      let chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString();
+        try {
+          resolve({ status: res.statusCode, body: JSON.parse(text) });
+        } catch {
+          resolve({ status: res.statusCode, body: { raw: text } });
+        }
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
 
 function parseBody(req) {
   return new Promise((resolve, reject) => {
@@ -21,13 +47,12 @@ module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Apenas POST.' });
-  }
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Apenas POST.' });
 
   try {
     const bodyData = await parseBody(req);
-    const { type, data, action } = bodyData;
+    const paymentId = bodyData.data?.id;
+    if (!paymentId) return res.status(200).json({ message: 'Sem payment_id.' });
 
     if (!admin.apps.length) {
       admin.initializeApp({
@@ -42,158 +67,46 @@ module.exports = async (req, res) => {
     }
 
     const db = admin.firestore();
+    const { body: payment } = await mpGet(`/v1/payments/${paymentId}`);
+    const externalRef = payment.external_reference;
+    if (!externalRef) return res.status(200).json({ message: 'Sem external_reference.' });
 
-    if (type === 'payment' || (data && data.id)) {
-      const paymentId = data.id;
-      const mpRes = await fetch(
-        `https://api.mercadopago.com/v1/payments/${paymentId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.MP_ACCESS_TOKEN}`,
-          },
-        },
-      );
-      const payment = await mpRes.json();
+    const assinaturaRef = db.collection('assinaturas').doc(externalRef);
+    const assinaturaDoc = await assinaturaRef.get();
+    if (!assinaturaDoc.exists) return res.status(200).json({ message: 'Assinatura não encontrada.' });
 
-      const planoMap = {
-        'Plano Premium - Leituras MC': 'premium',
-        'Plano Super Premium - Leituras MC': 'super_premium',
-      };
-
-      const externalRef = payment.external_reference;
-      const payerEmail = payment.payer?.email;
-
-      let query = db.collection('assinaturas');
-      let snapshot;
-
-      if (externalRef) {
-        snapshot = await query.where('id_mercadopago', '==', externalRef).get();
-      } else if (payerEmail) {
-        snapshot = await query.where('email_admin', '==', payerEmail).get();
-      } else {
-        snapshot = await query.where('status', '==', 'pending').limit(10).get();
+    const assinatura = assinaturaDoc.data();
+    const faturas = (assinatura.faturas || []).map((f) => {
+      if (f.id_mp === paymentId) {
+        return { ...f, status: payment.status, data_pagamento: admin.firestore.FieldValue.serverTimestamp() };
       }
+      return f;
+    });
 
-      if (snapshot.empty) {
-        return res.status(200).json({ message: 'Nenhuma assinatura encontrada.' });
-      }
+    const updateData = { faturas };
 
-      const assinaturaDoc = snapshot.docs[0];
-      const assinaturaData = assinaturaDoc.data();
-      const idAdministradora = assinaturaDoc.id;
+    if (payment.status === 'approved') {
+      updateData.status = 'active';
+      updateData.ultimo_pagamento = admin.firestore.FieldValue.serverTimestamp();
+      updateData.data_expiracao = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
-      if (payment.status === 'approved') {
-        const planoId = planoMap[payment.description] || assinaturaData.plano || 'premium';
-        const precos = { premium: 12700, super_premium: 29700 };
+      await db.collection('administradoras').doc(externalRef).update({
+        status_assinatura: 'active',
+        plano: assinatura.plano,
+      });
+    }
 
-        await db.collection('assinaturas').doc(idAdministradora).update({
-          status: 'active',
-          status_mercadopago: 'authorized',
-          data_proximo_cobranca: new Date(
-            Date.now() + 30 * 24 * 60 * 60 * 1000,
-          ),
-          ultimo_pagamento: admin.firestore.FieldValue.serverTimestamp(),
-        });
-
-        await db.collection('administradoras').doc(idAdministradora).update({
-          plano: planoId,
-          status_assinatura: 'active',
-        });
-
-        await db.collection('pagamentos').add({
-          id_administradora: idAdministradora,
-          id_mercadopago: paymentId,
-          valor: precos[planoId] || 12700,
-          status: 'approved',
-          metodo: payment.payment_method?.id || 'unknown',
-          data: admin.firestore.FieldValue.serverTimestamp(),
-          plano: planoId,
-        });
-
-        return res.status(200).json({ message: 'Assinatura ativada com sucesso!' });
-      }
-
-      if (payment.status === 'rejected' || payment.status === 'cancelled') {
-        await db.collection('pagamentos').add({
-          id_administradora: idAdministradora,
-          id_mercadopago: paymentId,
-          valor: payment.transaction_amount
-            ? Math.round(payment.transaction_amount * 100)
-            : 0,
-          status: payment.status,
-          metodo: payment.payment_method?.id || 'unknown',
-          data: admin.firestore.FieldValue.serverTimestamp(),
-          plano: assinaturaData.plano || '',
-        });
-      }
-
-      if (payment.status === 'refunded') {
-        await db.collection('assinaturas').doc(idAdministradora).update({
-          status: 'cancelled',
-          status_mercadopago: 'cancelled',
-        });
-        await db.collection('administradoras').doc(idAdministradora).update({
-          status_assinatura: 'cancelled',
-        });
+    if (payment.status === 'rejected' || payment.status === 'cancelled') {
+      const temAtiva = faturas.some((f) => f.status === 'approved');
+      if (!temAtiva) {
+        updateData.status = 'past_due';
       }
     }
 
-    if (action === 'preapproval' || type === 'subscription') {
-      const subId = data.id;
-      const mpRes = await fetch(
-        `https://api.mercadopago.com/preapproval/${subId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.MP_ACCESS_TOKEN}`,
-          },
-        },
-      );
-      const sub = await mpRes.json();
-
-      const snapshot = await db
-        .collection('assinaturas')
-        .where('id_mercadopago', '==', subId)
-        .get();
-
-      if (!snapshot.empty) {
-        const doc = snapshot.docs[0];
-        const idAdm = doc.id;
-
-        if (sub.status === 'authorized') {
-          await db.collection('assinaturas').doc(idAdm).update({
-            status: 'active',
-            status_mercadopago: 'authorized',
-          });
-          await db.collection('administradoras').doc(idAdm).update({
-            status_assinatura: 'active',
-          });
-        }
-
-        if (sub.status === 'cancelled') {
-          await db.collection('assinaturas').doc(idAdm).update({
-            status: 'cancelled',
-            status_mercadopago: 'cancelled',
-          });
-          await db.collection('administradoras').doc(idAdm).update({
-            status_assinatura: 'cancelled',
-          });
-        }
-
-        if (sub.status === 'paused') {
-          await db.collection('assinaturas').doc(idAdm).update({
-            status: 'past_due',
-            status_mercadopago: 'paused',
-          });
-          await db.collection('administradoras').doc(idAdm).update({
-            status_assinatura: 'past_due',
-          });
-        }
-      }
-    }
-
-    return res.status(200).json({ message: 'Webhook processado.' });
+    await assinaturaRef.update(updateData);
+    return res.status(200).json({ message: `Pagamento ${payment.status} processado.` });
   } catch (error) {
     console.error('Erro no webhook:', error);
-    return res.status(200).json({ message: 'Webhook recebido com erro (não crítico).' });
+    return res.status(200).json({ message: 'Webhook recebido.' });
   }
 };

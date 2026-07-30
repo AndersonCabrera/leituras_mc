@@ -45,41 +45,12 @@ module.exports = async (req, res) => {
       });
     }
 
-    const assinaturaDoc = await admin
-      .firestore()
-      .collection('assinaturas')
-      .doc(id_administradora)
-      .get();
-
-    if (!assinaturaDoc.exists) {
-      return res.status(404).json({ error: 'Assinatura não encontrada.' });
-    }
-
-    const assinatura = assinaturaDoc.data();
-    const mpId = assinatura?.id_mercadopago;
-
-    if (mpId) {
-      const mpRes = await fetch(`https://api.mercadopago.com/preapproval/${mpId}`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${process.env.MP_ACCESS_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ status: 'cancelled' }),
-      });
-
-      if (!mpRes.ok) {
-        const err = await mpRes.json();
-        console.error('Erro MP ao cancelar:', err);
-      }
-    }
-
-    await admin.firestore().collection('assinaturas').doc(id_administradora).update({
+    const db = admin.firestore();
+    await db.collection('assinaturas').doc(id_administradora).update({
       status: 'cancelled',
-      status_mercadopago: 'cancelled',
     });
 
-    await admin.firestore().collection('administradoras').doc(id_administradora).update({
+    await db.collection('administradoras').doc(id_administradora).update({
       status_assinatura: 'cancelled',
     });
 

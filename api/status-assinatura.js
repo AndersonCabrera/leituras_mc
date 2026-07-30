@@ -9,7 +9,6 @@ module.exports = async (req, res) => {
 
   try {
     const { id_administradora } = req.query;
-
     if (!id_administradora) {
       return res.status(400).json({ error: 'id_administradora é obrigatório.' });
     }
@@ -38,15 +37,8 @@ module.exports = async (req, res) => {
       .doc(id_administradora)
       .get();
 
-    let assinatura = null;
-    if (assinaturaDoc.exists) {
-      assinatura = assinaturaDoc.data();
-    }
-
-    let administradora = null;
-    if (adminDoc.exists) {
-      administradora = adminDoc.data();
-    }
+    const assinatura = assinaturaDoc.exists ? assinaturaDoc.data() : null;
+    const administradora = adminDoc.exists ? adminDoc.data() : null;
 
     const plano = administradora?.plano || assinatura?.plano || 'gratis';
     const status = administradora?.status_assinatura || assinatura?.status || 'trial';
@@ -55,15 +47,18 @@ module.exports = async (req, res) => {
     const limitesCond = { gratis: 3, premium: 15, super_premium: -1 };
     const limitesLeit = { gratis: 3, premium: 15, super_premium: -1 };
 
+    const faturas = (assinatura?.faturas || []).slice(-6).reverse();
+    const ultimaFatura = faturas[0] || null;
+
     return res.status(200).json({
       plano,
-      status,
+      status_assinatura: status,
       preco_centavos: precos[plano] || 0,
       limite_condominios: limitesCond[plano] || 3,
       limite_leituristas: limitesLeit[plano] || 3,
-      id_mercadopago: assinatura?.id_mercadopago || null,
-      status_mercadopago: assinatura?.status_mercadopago || null,
-      data_proximo_cobranca: assinatura?.data_proximo_cobranca || null,
+      data_expiracao: assinatura?.data_expiracao || null,
+      faturas,
+      ultima_fatura: ultimaFatura,
     });
   } catch (error) {
     console.error('Erro ao verificar status:', error);

@@ -1,10 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter/services.dart';
 
 import '../../models/plano.dart';
 import '../../services/mercadopago_service.dart';
+import 'tela_pix_pagamento.dart';
 import 'tela_status_assinatura.dart';
 
 class TelaPlanos extends StatefulWidget {
@@ -27,8 +28,6 @@ class TelaPlanos extends StatefulWidget {
 
 class _TelaPlanosState extends State<TelaPlanos> {
   bool _carregando = false;
-
-  Timer? _pollTimer;
 
   Future<void> _assinar(Plano plano) async {
     setState(() => _carregando = true);
@@ -53,47 +52,24 @@ class _TelaPlanosState extends State<TelaPlanos> {
         return;
       }
 
-      final url = result['url'] as String?;
-      if (url != null && mounted) {
-        final uri = Uri.parse(url);
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Aguardando confirmação do pagamento...'),
-                backgroundColor: Colors.blue,
-              ),
-            );
-          }
-        }
-      }
-
-      _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
-        final status = await MercadoPagoService.verificarStatus(
-          idAdministradora: widget.idAdministradora,
-        );
-        if (status['status'] == 'active' && mounted) {
-          _pollTimer?.cancel();
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (_) => TelaStatusAssinatura(
-                idAdministradora: widget.idAdministradora,
-              ),
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => TelaPixPagamento(
+              idAdministradora: widget.idAdministradora,
+              qrCodeBase64: result['qr_code_base64'] as String? ?? '',
+              qrCodeTexto: result['qr_code'] as String? ?? '',
+              ticketUrl: result['ticket_url'] as String? ?? '',
+              valor: (result['valor'] as num?)?.toDouble() ?? 0,
+              faturaId: result['id_fatura'] as int? ?? 0,
             ),
-          );
-        }
-      });
+          ),
+        );
+      }
     } finally {
       setState(() => _carregando = false);
     }
-  }
-
-  @override
-  void dispose() {
-    _pollTimer?.cancel();
-    super.dispose();
   }
 
   @override
@@ -119,7 +95,7 @@ class _TelaPlanosState extends State<TelaPlanos> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Cancele quando quiser. Sem multa.',
+            'Pagamento via PIX. Cancele quando quiser.',
             style: TextStyle(fontSize: 14, color: Colors.grey),
             textAlign: TextAlign.center,
           ),
