@@ -19,16 +19,18 @@ module.exports = async (req, res) => {
   const id = req.query.id || 'teste-flow3';
 
   try {
-    await db.collection('assinaturas').doc(id).update({
+    await db.collection('assinaturas').doc(id).set({
       status: 'active',
       status_mercadopago: 'authorized',
       ultimo_pagamento: admin.firestore.FieldValue.serverTimestamp(),
-    });
+    }, { merge: true });
 
-    await db.collection('administradoras').doc(id).update({
+    await db.collection('administradoras').doc(id).set({
       plano: 'premium',
       status_assinatura: 'active',
-    });
+      nome_empresa: 'Teste',
+      data_criacao: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
 
     res.json({ message: 'Assinatura ativada com sucesso!', id });
   } catch (e) {
