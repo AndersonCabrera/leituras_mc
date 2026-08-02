@@ -25,23 +25,47 @@ jobs:
       - name: Build iOS (no codesign)
         run: flutter build ios --release --no-codesign 2>&1 | tee ios_build.log
 
-      - name: Diagnosticar saida do build
+      - name: Coletar diagnostico
         if: always()
         shell: bash
         run: |
-          diag=$(mktemp)
           {
+            echo "=== flutter --version ==="
+            flutter --version 2>&1 | head -5
+            echo "=== xcodebuild -version ==="
+            xcodebuild -version 2>&1 | head -3
             echo "=== ESTRUTURA (.app/.xcarchive) ==="
             find build -maxdepth 6 \( -name "*.app" -o -name "*.xcarchive" \) -print 2>/dev/null
             echo "=== build/ios ==="
             ls -la build/ios 2>/dev/null || echo "(sem build/ios)"
-            echo "=== RAIS build ==="
+            echo "=== build ==="
             ls -la build 2>/dev/null
-            echo "=== TAIL LOG (40) ==="
-            tail -n 40 ios_build.log 2>/dev/null || echo "(sem log)"
-          } > "$diag"
-          msg=$(sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g' "$diag")
-          echo "::warning title=Diagnostico-build::$msg"
+            echo "=== TAIL LOG (60) ==="
+            tail -n 60 ios_build.log 2>/dev/null || echo "(sem log)"
+          } > diag.txt
+
+      - name: Publicar diagnostico via Checks API
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let content = 'sem diagnostico';
+            try { content = fs.readFileSync('diag.txt', 'utf8'); } catch (e) {}
+            const resp = await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'Diagnostico-build',
+              head_sha: context.sha,
+              status: 'completed',
+              conclusion: 'neutral',
+              output: {
+                title: `Diagnostico-build (run ${context.runId})`,
+                summary: 'Diagnostico do build iOS',
+                text: content.slice(0, 60000)
+              }
+            });
+            core.info(`Check criado: ${resp.data.html_url}`)
 
       - name: Upload log de build
         if: always()
