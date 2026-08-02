@@ -23,7 +23,15 @@ jobs:
         run: flutter pub get
 
       - name: Build iOS (no codesign)
-        run: flutter build ios --release --no-codesign
+        run: flutter build ios --release --no-codesign 2>&1 | tee ios_build.log
+
+      - name: Upload log de build (em caso de falha)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-log
+          path: ios_build.log
+          if-no-files-found: warn
 
       - name: Upload Runner.app
         uses: actions/upload-artifact@v4
