@@ -114,6 +114,7 @@ flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
   image_path: "assets/logo.png"
-  # Se sua logo tiver fundo transparente, você pode definir a cor de fundo do Android aqui:
-  # adaptive_icon_background: "#ffffff"
+  remove_alpha_ios: true
+  adaptive_icon_background: "#ffffff"
+  adaptive_icon_foreground: "assets/logo.png"
 

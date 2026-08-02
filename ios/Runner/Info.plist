@@ -26,6 +26,14 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>A Leituras MC utiliza a câmera para fotografar o medidor e registrar a leitura com evidência fotográfica.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>A Leituras MC precisa de acesso às suas fotos para selecionar evidências fotográficas da leitura.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
