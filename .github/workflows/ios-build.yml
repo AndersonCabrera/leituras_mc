@@ -27,18 +27,21 @@ jobs:
 
       - name: Diagnosticar saida do build
         if: always()
+        shell: bash
         run: |
+          diag=$(mktemp)
           {
-            echo "### Tail do log do build"
-            echo '```'
-            tail -n 60 ios_build.log 2>/dev/null || echo "(sem log)"
-            echo '```'
-            echo "### Estrutura gerada"
-            echo '```'
-            find build -maxdepth 5 \( -name "*.app" -o -name "*.xcarchive" \) -print 2>/dev/null
+            echo "=== ESTRUTURA (.app/.xcarchive) ==="
+            find build -maxdepth 6 \( -name "*.app" -o -name "*.xcarchive" \) -print 2>/dev/null
+            echo "=== build/ios ==="
             ls -la build/ios 2>/dev/null || echo "(sem build/ios)"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+            echo "=== RAIS build ==="
+            ls -la build 2>/dev/null
+            echo "=== TAIL LOG (40) ==="
+            tail -n 40 ios_build.log 2>/dev/null || echo "(sem log)"
+          } > "$diag"
+          msg=$(sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g' "$diag")
+          echo "::warning title=Diagnostico-build::$msg"
 
       - name: Upload log de build
         if: always()
