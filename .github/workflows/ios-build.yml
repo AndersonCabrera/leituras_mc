@@ -34,16 +34,15 @@ jobs:
         if: always()
         shell: bash
         run: |
+          set +e
           {
             echo "=== LINHAS DE ERRO ==="
             grep -n -iE "error:|failed|fatal|cannot find|unable to|no such|exception|undefined symbol|CommandPhaseScript" ios_build.log 2>/dev/null | tail -25
-            echo "=== FLUTTER_EXIT ==="
-            grep "FLUTTER_EXIT_CODE" ios_build.log 2>/dev/null
-            echo "=== FINAL DO LOG (ultimos 50000 bytes) ==="
-            tail -c 50000 ios_build.log 2>/dev/null || echo "(sem log)"
+            echo "=== FINAL DO LOG (ultimos 20000 bytes) ==="
+            tail -c 20000 ios_build.log 2>/dev/null
           } | tr '\n' ' ' | sed 's/%/%25/g;s/\r//g' > diag_line.txt
-          head -c 60000 diag_line.txt > diag_cut.txt
-          echo "::warning title=Diagnostico-build::$(cat diag_cut.txt)"
+          msg=$(head -c 16000 diag_line.txt)
+          echo "::warning title=Diagnostico-build::$msg" || true
 
       - name: Upload diagnostico
         if: always()
