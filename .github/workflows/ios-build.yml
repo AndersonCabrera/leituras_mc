@@ -35,20 +35,15 @@ jobs:
         shell: bash
         run: |
           {
-            echo "=== flutter --version ==="
-            flutter --version 2>&1 | head -5
-            echo "=== xcodebuild -version ==="
-            xcodebuild -version 2>&1 | head -3
-            echo "=== ESTRUTURA (.app/.xcarchive) ==="
-            find build -maxdepth 6 \( -name "*.app" -o -name "*.xcarchive" \) -print 2>/dev/null
-            echo "=== build/ios ==="
-            ls -la build/ios 2>/dev/null || echo "(sem build/ios)"
-            echo "=== build ==="
-            ls -la build 2>/dev/null
-            echo "=== LOG COMPLETO ==="
-            cat ios_build.log 2>/dev/null || echo "(sem log)"
+            echo "=== LINHAS DE ERRO ==="
+            grep -n -iE "error:|failed|fatal|cannot find|unable to|no such|exception|undefined symbol|CommandPhaseScript" ios_build.log 2>/dev/null | tail -25
+            echo "=== FLUTTER_EXIT ==="
+            grep "FLUTTER_EXIT_CODE" ios_build.log 2>/dev/null
+            echo "=== FINAL DO LOG (ultimos 50000 bytes) ==="
+            tail -c 50000 ios_build.log 2>/dev/null || echo "(sem log)"
           } | tr '\n' ' ' | sed 's/%/%25/g;s/\r//g' > diag_line.txt
-          echo "::warning title=Diagnostico-build::$(cat diag_line.txt)"
+          head -c 60000 diag_line.txt > diag_cut.txt
+          echo "::warning title=Diagnostico-build::$(cat diag_cut.txt)"
 
       - name: Upload diagnostico
         if: always()
