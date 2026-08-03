@@ -16,14 +16,19 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          flutter-version: '3.41.4'
           cache: true
 
       - name: Flutter pub get
         run: flutter pub get
 
       - name: Build iOS (no codesign)
-        run: flutter build ios --release --no-codesign 2>&1 | tee ios_build.log
+        run: |
+          set +e
+          flutter build ios --release --no-codesign 2>&1 | tee ios_build.log
+          status=${PIPESTATUS[0]}
+          echo "FLUTTER_EXIT_CODE=$status"
+          exit $status
 
       - name: Coletar diagnostico
         if: always()
@@ -40,8 +45,8 @@ jobs:
             ls -la build/ios 2>/dev/null || echo "(sem build/ios)"
             echo "=== build ==="
             ls -la build 2>/dev/null
-            echo "=== TAIL LOG (60) ==="
-            tail -n 60 ios_build.log 2>/dev/null || echo "(sem log)"
+            echo "=== LOG COMPLETO ==="
+            cat ios_build.log 2>/dev/null || echo "(sem log)"
           } | tr '\n' ' ' | sed 's/%/%25/g;s/\r//g' > diag_line.txt
           echo "::warning title=Diagnostico-build::$(cat diag_line.txt)"
 
