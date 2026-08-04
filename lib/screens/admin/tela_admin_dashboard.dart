@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../auth/tela_login.dart';
+import '../super_admin/tela_importacao_massa.dart';
 import 'tela_configuracoes_marca.dart';
 import 'tela_auditoria.dart';
 import 'tela_fechamento_lote.dart';
@@ -387,7 +388,23 @@ class TelaAdminDashboard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 15),
-                      Expanded(child: const SizedBox()),
+                      Expanded(
+                        child: _actionCard(
+                          context,
+                          'Importar',
+                          'Unidades em Massa',
+                          Icons.file_upload_rounded,
+                          Colors.green.shade600,
+                          () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => TelaImportacaoMassa(
+                                idAdministradora: idAdministradora,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ],

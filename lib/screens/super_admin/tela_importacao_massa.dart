@@ -71,9 +71,10 @@ class _TelaImportacaoMassaState extends State<TelaImportacaoMassa> {
       if (_temEnergia) medidores.add('energia');
 
       await FirebaseFirestore.instance.collection('predios').add({
-        'id_administradora': widget.idAdministradora,
-        'nome_predio': _nomePredioCtrl.text.trim().toUpperCase(),
+        'admin_id': widget.idAdministradora,
+        'nome': _nomePredioCtrl.text.trim().toUpperCase(),
         'endereco': _enderecoCtrl.text.trim(),
+        'limite_consumo_alerta': 1.0,
         'medidores': medidores,
         'apartamentos': apartamentosLimpos,
         'data_cadastro': FieldValue.serverTimestamp(),
