@@ -18,6 +18,8 @@ class TelaSuperAdminDashboard extends StatefulWidget {
 }
 
 class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
+  final GlobalKey _clientesKey = GlobalKey();
+
   void _abrirDialogImportacao(String idAdministradora) {
     Navigator.push(
       context,
@@ -114,6 +116,15 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
                           FirebaseFirestore.instance
                               .collection('administradoras')
                               .snapshots(),
+                          onTap: () {
+                            if (_clientesKey.currentContext != null) {
+                              Scrollable.ensureVisible(
+                                _clientesKey.currentContext!,
+                                duration: const Duration(milliseconds: 400),
+                                curve: Curves.easeInOut,
+                              );
+                            }
+                          },
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -127,6 +138,15 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
                               .collection('usuarios')
                               .where('cargo', isEqualTo: 'admin')
                               .snapshots(),
+                          onTap: () {
+                            if (_clientesKey.currentContext != null) {
+                              Scrollable.ensureVisible(
+                                _clientesKey.currentContext!,
+                                duration: const Duration(milliseconds: 400),
+                                curve: Curves.easeInOut,
+                              );
+                            }
+                          },
                         ),
                       ),
                     ],
@@ -352,6 +372,7 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
           ),
 
           SliverToBoxAdapter(
+            key: _clientesKey,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 25, 20, 15),
               child: Text(
@@ -626,14 +647,14 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
     String titulo,
     IconData icon,
     Color cor,
-    Stream<QuerySnapshot> stream,
-  ) {
+    Stream<QuerySnapshot> stream, {
+    VoidCallback? onTap,
+  }) {
     bool isDark = Theme.of(context).brightness == Brightness.dark;
     Color cardColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
     Color textColor = isDark ? Colors.white : const Color(0xFF1A1A2E);
 
     return Container(
-      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: cardColor,
         borderRadius: BorderRadius.circular(16),
@@ -645,33 +666,43 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: cor, size: 28),
-          const SizedBox(height: 12),
-          StreamBuilder<QuerySnapshot>(
-            stream: stream,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting)
-                return const Text('...',
-                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold));
-              int count = snapshot.data?.docs.length ?? 0;
-              return Text(
-                count.toString(),
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: textColor,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(icon, color: cor, size: 28),
+                const SizedBox(height: 12),
+                StreamBuilder<QuerySnapshot>(
+                  stream: stream,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting)
+                      return const Text('...',
+                          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold));
+                    int count = snapshot.data?.docs.length ?? 0;
+                    return Text(
+                      count.toString(),
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: textColor,
+                      ),
+                    );
+                  },
                 ),
-              );
-            },
+                const SizedBox(height: 4),
+                Text(titulo,
+                    style: const TextStyle(
+                        fontSize: 13, color: Colors.grey, fontWeight: FontWeight.w500)),
+              ],
+            ),
           ),
-          const SizedBox(height: 4),
-          Text(titulo,
-              style: const TextStyle(
-                  fontSize: 13, color: Colors.grey, fontWeight: FontWeight.w500)),
-        ],
+        ),
       ),
     );
   }

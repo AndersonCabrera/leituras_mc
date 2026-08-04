@@ -17,6 +17,8 @@ class _TelaSincronizacaoState extends State<TelaSincronizacao> {
   List<Map<String, dynamic>> filaDeLeituras = [];
   bool sincronizando = false;
   int totalParaSincronizar = 0;
+  int _currentIndex = 0;
+  String _statusMessage = '';
 
   @override
   void initState() {
@@ -34,13 +36,25 @@ class _TelaSincronizacaoState extends State<TelaSincronizacao> {
 
   Future<void> _enviarParaNuvem() async {
     if (filaDeLeituras.isEmpty) return;
+
+    final itensParaEnviar = List<Map<String, dynamic>>.from(filaDeLeituras);
+
     setState(() {
       sincronizando = true;
+      _currentIndex = 0;
     });
 
     int sucessoCount = 0;
+    int falhaCount = 0;
 
-    for (var linha in filaDeLeituras) {
+    for (var linha in itensParaEnviar) {
+      if (!mounted) return;
+
+      setState(() {
+        _currentIndex++;
+        _statusMessage = 'Enviando $_currentIndex de ${itensParaEnviar.length}...';
+      });
+
       try {
         int idLocal = linha['id'];
         String itemJson = linha['dados'];
@@ -51,31 +65,47 @@ class _TelaSincronizacaoState extends State<TelaSincronizacao> {
         if (caminhoLocal != null && !caminhoLocal.startsWith('base64:')) {
           io.File arquivoLocal = io.File(caminhoLocal);
           if (await arquivoLocal.exists()) {
+            try {
+              final ref = FirebaseStorage.instance.ref().child(
+                'comprovantes/foto_${DateTime.now().millisecondsSinceEpoch}.jpg',
+              );
+              await ref.putFile(
+                arquivoLocal,
+                SettableMetadata(contentType: 'image/jpeg'),
+              );
+              urlFotoFirebase = await ref.getDownloadURL();
+              await arquivoLocal.delete();
+            } catch (e) {
+              debugPrint("Falha no upload da foto (arquivo local): $e");
+            }
+          } else {
+            debugPrint("Arquivo de foto não encontrado: $caminhoLocal");
+          }
+        } else if (caminhoLocal != null && caminhoLocal.startsWith('base64:')) {
+          try {
+            final Uint8List imageBytes = base64Decode(
+              caminhoLocal.replaceAll('base64:', ''),
+            );
             final ref = FirebaseStorage.instance.ref().child(
               'comprovantes/foto_${DateTime.now().millisecondsSinceEpoch}.jpg',
             );
-            await ref.putFile(
-              arquivoLocal,
+            final tarefa = await ref.putData(
+              imageBytes,
               SettableMetadata(contentType: 'image/jpeg'),
             );
-            urlFotoFirebase = await ref.getDownloadURL();
-            await arquivoLocal.delete();
+            urlFotoFirebase = await tarefa.ref.getDownloadURL();
+          } catch (e) {
+            debugPrint("Falha no upload da foto (base64): $e");
           }
-        } else if (caminhoLocal != null && caminhoLocal.startsWith('base64:')) {
-          final Uint8List imageBytes = base64Decode(
-            caminhoLocal.replaceAll('base64:', ''),
-          );
-          final ref = FirebaseStorage.instance.ref().child(
-            'comprovantes/foto_${DateTime.now().millisecondsSinceEpoch}.jpg',
-          );
-          final tarefa = await ref.putData(
-            imageBytes,
-            SettableMetadata(contentType: 'image/jpeg'),
-          );
-          urlFotoFirebase = await tarefa.ref.getDownloadURL();
         }
 
-        DateTime dataLeitura = DateTime.parse(dados['data_hora_string']);
+        DateTime dataLeitura;
+        try {
+          dataLeitura = DateTime.parse(dados['data_hora_string']);
+        } catch (_) {
+          dataLeitura = DateTime.now();
+        }
+
         String mesAno = "${dataLeitura.month}_${dataLeitura.year}";
         String idUnicoDoc =
             "${dados['condominio']}_${dados['apartamento']}_${dados['medidor']}_$mesAno"
@@ -108,28 +138,33 @@ class _TelaSincronizacaoState extends State<TelaSincronizacao> {
         sucessoCount++;
       } catch (e) {
         debugPrint("Falha ao sincronizar item: $e");
+        falhaCount++;
       }
     }
 
     await _carregarFila();
-    setState(() {
-      sincronizando = false;
-    });
     if (mounted) {
+      setState(() {
+        sincronizando = false;
+      });
+
       if (filaDeLeituras.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Tudo enviado para a nuvem com sucesso!'),
+          SnackBar(
+            content: Text(
+              'Concluído! $sucessoCount leitura(s) enviada(s) com sucesso.',
+            ),
             backgroundColor: Colors.green,
           ),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(
-              'Algumas leituras falharam. Verifique a sua internet.',
+              '$sucessoCount enviada(s), $falhaCount falharam. '
+              '${filaDeLeituras.length} na fila.',
             ),
-            backgroundColor: Colors.orange,
+            backgroundColor: falhaCount > 0 ? Colors.orange : Colors.green,
           ),
         );
       }
@@ -179,23 +214,44 @@ class _TelaSincronizacaoState extends State<TelaSincronizacao> {
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 50),
-              if (totalParaSincronizar > 0)
+              if (sincronizando) ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: Column(
+                    children: [
+                      Text(
+                        _statusMessage,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      LinearProgressIndicator(
+                        value: totalParaSincronizar > 0
+                            ? _currentIndex / totalParaSincronizar
+                            : 0,
+                        minHeight: 8,
+                        backgroundColor: Colors.grey.shade200,
+                      ),
+                    ],
+                  ),
+                ),
+              ] else if (totalParaSincronizar > 0)
                 SizedBox(
                   width: double.infinity,
                   height: 60,
-                  child: sincronizando
-                      ? const Center(child: CircularProgressIndicator())
-                      : ElevatedButton.icon(
-                          icon: const Icon(Icons.sync, color: Colors.white),
-                          label: const Text(
-                            'Sincronizar Agora',
-                            style: TextStyle(fontSize: 18, color: Colors.white),
-                          ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blue.shade800,
-                          ),
-                          onPressed: _enviarParaNuvem,
-                        ),
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.sync, color: Colors.white),
+                    label: Text(
+                      'Sincronizar $totalParaSincronizar Leitura(s)',
+                      style: const TextStyle(fontSize: 18, color: Colors.white),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue.shade800,
+                    ),
+                    onPressed: _enviarParaNuvem,
+                  ),
                 ),
             ],
           ),

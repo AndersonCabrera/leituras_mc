@@ -219,7 +219,7 @@ class TelaAdminDashboard extends StatelessWidget {
                           Colors.blue.shade700,
                           FirebaseFirestore.instance
                               .collection('predios')
-                              .where('id_administradora', isEqualTo: idAdministradora)
+                              .where('admin_id', isEqualTo: idAdministradora)
                               .snapshots(),
                           () => Navigator.push(
                             context,

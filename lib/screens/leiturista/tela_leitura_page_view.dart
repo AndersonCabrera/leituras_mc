@@ -403,7 +403,7 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
       String mesAtual = "${agora.month}_${agora.year}";
       var query = await FirebaseFirestore.instance
           .collection('predios')
-          .where('nome_predio', isEqualTo: widget.condominio)
+          .where('nome', isEqualTo: widget.condominio)
           .limit(1)
           .get();
       if (query.docs.isEmpty) {
