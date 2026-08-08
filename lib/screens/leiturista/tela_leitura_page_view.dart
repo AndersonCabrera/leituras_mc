@@ -555,9 +555,9 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
   Future<void> _tirarFotoManual() async {
     final foto = await _picker.pickImage(
       source: ImageSource.camera,
-      imageQuality: 60,
-      maxWidth: 1024,
-      maxHeight: 1024,
+      imageQuality: 40,
+      maxWidth: 800,
+      maxHeight: 800,
     );
     if (foto != null) setState(() => fotoComprovante = foto);
   }
@@ -565,9 +565,9 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
   Future<void> _abrirGaleria() async {
     final foto = await _picker.pickImage(
       source: ImageSource.gallery,
-      imageQuality: 60,
-      maxWidth: 1024,
-      maxHeight: 1024,
+      imageQuality: 40,
+      maxWidth: 800,
+      maxHeight: 800,
     );
     if (foto != null) setState(() => fotoComprovante = foto);
   }

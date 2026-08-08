@@ -1,6 +1,6 @@
 const admin = require('firebase-admin');
 
-module.exports = async (req, res) => {
+const inicializarFirebase = () => {
   // 1. Sempre enviar os cabeçalhos de CORS primeiro! 
   // Isso impede que o Flutter Web mostre o erro genérico "Failed to fetch"
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -13,6 +13,12 @@ module.exports = async (req, res) => {
 
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Apenas método POST é permitido.' });
+  }
+};
+
+module.exports = async (req, res) => {
+  if (!admin.apps.length) {
+    inicializarFirebase();
   }
 
   try {

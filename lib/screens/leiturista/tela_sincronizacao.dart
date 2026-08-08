@@ -50,52 +50,71 @@ class _TelaSincronizacaoState extends State<TelaSincronizacao> {
     for (var linha in itensParaEnviar) {
       if (!mounted) return;
 
-      setState(() {
-        _currentIndex++;
-        _statusMessage = 'Enviando $_currentIndex de ${itensParaEnviar.length}...';
-      });
-
       try {
         int idLocal = linha['id'];
         String itemJson = linha['dados'];
         Map<String, dynamic> dados = jsonDecode(itemJson);
         String? urlFotoFirebase;
         String? caminhoLocal = dados['caminho_foto_local'];
+        bool temFoto = caminhoLocal != null && caminhoLocal.isNotEmpty;
+
+        setState(() {
+          _currentIndex++;
+          _statusMessage = temFoto 
+              ? 'Enviando $_currentIndex de ${itensParaEnviar.length} (com foto)...'
+              : 'Enviando $_currentIndex de ${itensParaEnviar.length}...';
+        });
 
         if (caminhoLocal != null && !caminhoLocal.startsWith('base64:')) {
           io.File arquivoLocal = io.File(caminhoLocal);
           if (await arquivoLocal.exists()) {
-            try {
-              final ref = FirebaseStorage.instance.ref().child(
-                'comprovantes/foto_${DateTime.now().millisecondsSinceEpoch}.jpg',
-              );
-              await ref.putFile(
-                arquivoLocal,
-                SettableMetadata(contentType: 'image/jpeg'),
-              );
-              urlFotoFirebase = await ref.getDownloadURL();
-              await arquivoLocal.delete();
-            } catch (e) {
-              debugPrint("Falha no upload da foto (arquivo local): $e");
+            int tentativas = 0;
+            const int maxTentativas = 3;
+            while (tentativas < maxTentativas && urlFotoFirebase == null) {
+              try {
+                final ref = FirebaseStorage.instance.ref().child(
+                  'comprovantes/foto_${DateTime.now().millisecondsSinceEpoch}.jpg',
+                );
+                await ref.putFile(
+                  arquivoLocal,
+                  SettableMetadata(contentType: 'image/jpeg'),
+                ).timeout(const Duration(seconds: 60));
+                urlFotoFirebase = await ref.getDownloadURL();
+                await arquivoLocal.delete();
+              } catch (e) {
+                tentativas++;
+                debugPrint("Falha no upload da foto (tentativa $tentativas/$maxTentativas): $e");
+                if (tentativas < maxTentativas) {
+                  await Future.delayed(Duration(seconds: tentativas * 2));
+                }
+              }
             }
           } else {
             debugPrint("Arquivo de foto não encontrado: $caminhoLocal");
           }
         } else if (caminhoLocal != null && caminhoLocal.startsWith('base64:')) {
-          try {
-            final Uint8List imageBytes = base64Decode(
-              caminhoLocal.replaceAll('base64:', ''),
-            );
-            final ref = FirebaseStorage.instance.ref().child(
-              'comprovantes/foto_${DateTime.now().millisecondsSinceEpoch}.jpg',
-            );
-            final tarefa = await ref.putData(
-              imageBytes,
-              SettableMetadata(contentType: 'image/jpeg'),
-            );
-            urlFotoFirebase = await tarefa.ref.getDownloadURL();
-          } catch (e) {
-            debugPrint("Falha no upload da foto (base64): $e");
+          int tentativas = 0;
+          const int maxTentativas = 3;
+          while (tentativas < maxTentativas && urlFotoFirebase == null) {
+            try {
+              final Uint8List imageBytes = base64Decode(
+                caminhoLocal.replaceAll('base64:', ''),
+              );
+              final ref = FirebaseStorage.instance.ref().child(
+                'comprovantes/foto_${DateTime.now().millisecondsSinceEpoch}.jpg',
+              );
+              final tarefa = await ref.putData(
+                imageBytes,
+                SettableMetadata(contentType: 'image/jpeg'),
+              ).timeout(const Duration(seconds: 60));
+              urlFotoFirebase = await tarefa.ref.getDownloadURL();
+            } catch (e) {
+              tentativas++;
+              debugPrint("Falha no upload da foto (base64, tentativa $tentativas/$maxTentativas): $e");
+              if (tentativas < maxTentativas) {
+                await Future.delayed(Duration(seconds: tentativas * 2));
+              }
+            }
           }
         }
 

@@ -1,16 +1,66 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:firebase_core/firebase_core.dart';
 
 import '../../models/plano.dart';
 
 class TelaListaEquipe extends StatelessWidget {
   final String idAdministradora;
-  const TelaListaEquipe({super.key, required this.idAdministradora});
+  const TelaListaEquipe({Key? key, required this.idAdministradora})
+    : super(key: key);
 
   @override
   Widget build(BuildContext context) {
+    // URL da sua API na Vercel para excluir o usuário.
+    const String vercelApiUrl =
+        'https://leituras-mc.vercel.app/api/excluirUsuario';
+
+    Future<void> excluirLeiturista(String userId, String userName) async {
+      bool? confirmar = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Confirmar Exclusão'),
+          content: Text(
+            'Tem certeza que deseja excluir o leiturista $userName? Esta ação não pode ser desfeita.',
+          ),
+          actions: [
+            TextButton(
+              child: const Text('Cancelar'),
+              onPressed: () => Navigator.of(ctx).pop(false),
+            ),
+            TextButton(
+              child: const Text('Excluir', style: TextStyle(color: Colors.red)),
+              onPressed: () => Navigator.of(ctx).pop(true),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmar != true) return;
+
+      try {
+        final response = await http.post(
+          Uri.parse(vercelApiUrl),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'userId': userId}),
+        );
+
+        if (response.statusCode != 200 && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Erro ao excluir: ${response.body}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      } catch (e) {
+        // Tratar erros de conexão
+      }
+    }
+
     return Scaffold(
       backgroundColor: const Color(0xFFF5F6FA),
       appBar: AppBar(
@@ -63,6 +113,7 @@ class TelaListaEquipe extends StatelessWidget {
             itemCount: equipe.length,
             itemBuilder: (context, index) {
               var leiturista = equipe[index].data() as Map<String, dynamic>;
+              var leituristaId = equipe[index].id;
               String nome = leiturista['nome'] ?? 'Sem nome';
               String inicial = nome.isNotEmpty ? nome[0].toUpperCase() : '?';
 
@@ -97,9 +148,29 @@ class TelaListaEquipe extends StatelessWidget {
                     ),
                   ),
                   subtitle: Text(leiturista['email'] ?? 'Sem email'),
-                  trailing: const Icon(
-                    Icons.chevron_right_rounded,
-                    color: Colors.grey,
+                  trailing: PopupMenuButton<String>(
+                    onSelected: (value) {
+                      if (value == 'excluir') {
+                        excluirLeiturista(leituristaId, nome);
+                      }
+                    },
+                    itemBuilder: (BuildContext context) =>
+                        <PopupMenuEntry<String>>[
+                          const PopupMenuItem<String>(
+                            value: 'excluir',
+                            child: ListTile(
+                              leading: Icon(
+                                Icons.delete_forever,
+                                color: Colors.red,
+                              ),
+                              title: Text(
+                                'Excluir',
+                                style: TextStyle(color: Colors.red),
+                              ),
+                            ),
+                          ),
+                        ],
+                    icon: const Icon(Icons.more_vert, color: Colors.grey),
                   ),
                 ),
               );
@@ -124,10 +195,14 @@ class TelaListaEquipe extends StatelessWidget {
               var planoId = dadosAdm?['plano'] ?? 'gratis';
               var plano = Plano.fromId(planoId);
               var qtdAtual = snapshotLeit.data?.docs.length ?? 0;
-              var atingiuLimite = !plano.ilimitadoLeituristas && qtdAtual >= plano.limiteLeituristas;
+              var atingiuLimite =
+                  !plano.ilimitadoLeituristas &&
+                  qtdAtual >= plano.limiteLeituristas;
 
               return FloatingActionButton.extended(
-                backgroundColor: atingiuLimite ? Colors.grey : Colors.green.shade700,
+                backgroundColor: atingiuLimite
+                    ? Colors.grey
+                    : Colors.green.shade700,
                 onPressed: () {
                   if (atingiuLimite) {
                     _mostrarLimiteAtingido(context);
@@ -136,8 +211,9 @@ class TelaListaEquipe extends StatelessWidget {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) =>
-                          TelaCadastroLeiturista(idAdministradora: idAdministradora),
+                      builder: (_) => TelaCadastroLeiturista(
+                        idAdministradora: idAdministradora,
+                      ),
                     ),
                   );
                 },
@@ -147,7 +223,10 @@ class TelaListaEquipe extends StatelessWidget {
                 ),
                 label: Text(
                   atingiuLimite ? 'Limite do Plano' : 'Novo Leiturista',
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               );
             },
@@ -166,7 +245,10 @@ class TelaListaEquipe extends StatelessWidget {
           children: [
             Icon(Icons.cloud_off_rounded, color: Colors.orange, size: 28),
             SizedBox(width: 10),
-            Text('Limite Atingido', style: TextStyle(fontWeight: FontWeight.bold)),
+            Text(
+              'Limite Atingido',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
           ],
         ),
         content: const Text(
@@ -177,7 +259,10 @@ class TelaListaEquipe extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('OK', style: TextStyle(fontWeight: FontWeight.bold)),
+            child: const Text(
+              'OK',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
           ),
         ],
       ),

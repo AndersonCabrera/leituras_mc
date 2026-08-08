@@ -5,7 +5,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../auth/tela_login.dart';
 import 'tela_cadastro_administradora.dart';
 import 'tela_criar_acesso_cliente.dart';
-import 'tela_importacao_massa.dart';
 import '../../models/plano.dart';
 import '../../core/theme.dart';
 
@@ -19,16 +18,6 @@ class TelaSuperAdminDashboard extends StatefulWidget {
 
 class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
   final GlobalKey _clientesKey = GlobalKey();
-
-  void _abrirDialogImportacao(String idAdministradora) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) =>
-            TelaImportacaoMassa(idAdministradora: idAdministradora),
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -595,34 +584,6 @@ class _TelaSuperAdminDashboardState extends State<TelaSuperAdminDashboard> {
                                         ),
                                       );
                                     },
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: ElevatedButton.icon(
-                                    icon: const Icon(
-                                      Icons.paste_rounded,
-                                      size: 18,
-                                      color: Colors.white,
-                                    ),
-                                    label: const Text(
-                                      'Importar',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.green.shade700,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      padding:
-                                          const EdgeInsets.symmetric(vertical: 12),
-                                      elevation: 0,
-                                    ),
-                                    onPressed: () =>
-                                        _abrirDialogImportacao(doc.id),
                                   ),
                                 ),
                               ],

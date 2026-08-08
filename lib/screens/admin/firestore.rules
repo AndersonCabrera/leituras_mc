@@ -1,0 +1,34 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Usuários podem ler e atualizar seus próprios dados.
+    match /usuarios/{userId} {
+      allow read, update: if request.auth != null && request.auth.uid == userId;
+      // Super admins podem criar usuários. Admins podem criar leituristas.
+      allow create: if request.auth != null; 
+    }
+
+    // Administradoras só podem ser lidas por usuários autenticados.
+    match /administradoras/{adminId} {
+      allow read: if request.auth != null;
+      // A criação/edição é feita pelo Super Admin.
+    }
+
+    // Regras para Prédios
+    match /predios/{predioId} {
+      // Permite leitura se o usuário estiver logado e o admin_id do prédio for o seu.
+      allow read: if request.auth != null && resource.data.admin_id == request.auth.uid;
+      // Permite criar um prédio se o admin_id do novo prédio for o UID do usuário logado.
+      allow create: if request.auth != null && request.resource.data.admin_id == request.auth.uid;
+      // Permite atualizar/excluir se o admin_id existente for o UID do usuário.
+      allow update, delete: if request.auth != null && resource.data.admin_id == request.auth.uid;
+    }
+
+    // Leituras podem ser criadas por usuários autenticados.
+    match /leituras/{leituraId} {
+      allow read, write, delete: if request.auth != null;
+    }
+  }
+}
