@@ -134,20 +134,29 @@ class TelaGestaoPredios extends StatelessWidget {
                     'Limite para foto: ${limite.toStringAsFixed(1)} m³\nEquipe: ${data['leiturista_nome'] ?? 'Não vinculada'}',
                     style: TextStyle(color: theme.textTheme.bodyMedium?.color),
                   ),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.edit, color: Colors.grey),
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => TelaFormularioPredio(
-                            predioId: doc.id,
-                            predioData: data,
-                            adminId: adminId, // Passando o adminId
-                          ),
-                        ),
-                      );
-                    },
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.edit, color: Colors.grey),
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => TelaFormularioPredio(
+                                predioId: doc.id,
+                                predioData: data,
+                                adminId: adminId,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                        onPressed: () => _confirmarExclusaoRapida(context, doc.id),
+                      ),
+                    ],
                   ),
                 ),
               );
@@ -211,6 +220,66 @@ class TelaGestaoPredios extends StatelessWidget {
         },
       ),
     );
+  }
+
+  void _confirmarExclusaoRapida(BuildContext context, String predioId) async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Confirmar Exclusao'),
+        content: const Text(
+          'Esta acao e irreversivel e ira apagar o predio e TODOS os seus apartamentos. Deseja continuar?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Excluir', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmar == true) {
+      try {
+        final apartamentos = await FirebaseFirestore.instance
+            .collection('predios')
+            .doc(predioId)
+            .collection('apartamentos')
+            .get();
+        final batch = FirebaseFirestore.instance.batch();
+        for (final doc in apartamentos.docs) {
+          batch.delete(doc.reference);
+        }
+        await batch.commit();
+
+        await FirebaseFirestore.instance
+            .collection('predios')
+            .doc(predioId)
+            .delete();
+
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Predio excluido com sucesso!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Erro ao excluir: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
   }
 
   void _mostrarLimiteAtingido(
@@ -600,7 +669,7 @@ class _TelaFormularioPredioState extends State<TelaFormularioPredio> {
           controller: importCtrl,
           maxLines: 10,
           decoration: const InputDecoration(
-            hintText: 'Cole a lista de apartamentos aqui (um por linha)',
+            hintText: 'Cole a lista (um por linha, ou separados por virgula)',
             border: OutlineInputBorder(),
           ),
         ),
@@ -612,7 +681,7 @@ class _TelaFormularioPredioState extends State<TelaFormularioPredio> {
           ElevatedButton(
             onPressed: () {
               final linhas = importCtrl.text
-                  .split('\n')
+                  .split(RegExp(r'[,;\n]'))
                   .map((e) => e.trim())
                   .where((e) => e.isNotEmpty);
               setState(() {

@@ -2,50 +2,83 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function isSuperAdmin() {
-      return request.auth != null &&
-        get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.cargo == 'super_admin';
-    }
-
-    function isAdminDaEmpresa(empresaId) {
-      return request.auth != null &&
-        get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.id_administradora == empresaId;
-    }
-
-    function isAuthenticated() {
+    function isAutenticado() {
       return request.auth != null;
     }
 
-    match /assinaturas/{idAdministradora} {
-      allow read: if isAuthenticated() && (isAdminDaEmpresa(idAdministradora) || isSuperAdmin());
+    function getDadosUsuario() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
+    }
+
+    function isSuperAdmin() {
+      return isAutenticado() && getDadosUsuario().cargo == 'super_admin';
+    }
+
+    function isGestorDaAdministradora(idAdminPayload) {
+      let user = getDadosUsuario();
+      return isAutenticado() && user.cargo == 'admin' && user.id_administradora == idAdminPayload;
+    }
+
+    // 1. Configuracoes de Marca
+    match /configuracoes_marca/{adminId} {
+      allow read: if isAutenticado();
+      allow update: if isGestorDaAdministradora(adminId) &&
+                    (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['plano_premium']));
+      allow create, delete: if isSuperAdmin();
+    }
+
+    // 2. Administradoras
+    match /administradoras/{adminId} {
+      allow read: if isAutenticado();
       allow write: if isSuperAdmin();
     }
 
-    match /pagamentos/{pagamentoId} {
-      allow read: if isAuthenticated();
-      allow write: if isSuperAdmin();
-    }
-
-    match /administradoras/{idAdministradora} {
-      allow read: if isAuthenticated() && (isAdminDaEmpresa(idAdministradora) || isSuperAdmin());
-      allow write: if isSuperAdmin();
-    }
-
+    // 3. Usuarios
     match /usuarios/{userId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin());
+      allow read: if isAutenticado();
+      allow create: if isAutenticado();
+      allow update, delete: if isSuperAdmin() || isGestorDaAdministradora(resource.data.id_administradora);
     }
 
+    // 4. Predios — usa 'admin_id' que e o campo que o app envia
     match /predios/{predioId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isAutenticado();
+      allow create: if isGestorDaAdministradora(request.resource.data.admin_id);
+      allow update, delete: if isGestorDaAdministradora(resource.data.admin_id);
     }
 
+    // 5. Leituras
     match /leituras/{leituraId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isAutenticado();
+      allow create: if isAutenticado() &&
+                    request.resource.data.keys().hasAll(['condominio', 'apartamento', 'medidor', 'leitura_atual']) &&
+                    (request.resource.data.consumo == null || request.resource.data.consumo >= 0 || request.resource.data.correcao_manual == true);
+      allow update: if isAutenticado();
+      allow delete: if isAutenticado() && getDadosUsuario().cargo == 'admin';
     }
 
+    // 6. Notificacoes
     match /notificacoes_enviadas/{notificacaoId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isGestorDaAdministradora(resource.data.id_administradora) || isSuperAdmin();
+      allow create: if isGestorDaAdministradora(request.resource.data.id_administradora) || isSuperAdmin();
+      allow update, delete: if false;
+    }
+
+    // 7. Assinaturas
+    match /assinaturas/{idAdministradora} {
+      allow read: if isAutenticado() && (isGestorDaAdministradora(idAdministradora) || isSuperAdmin());
+      allow write: if isSuperAdmin();
+    }
+
+    // 8. Pagamentos
+    match /pagamentos/{pagamentoId} {
+      allow read: if isAutenticado();
+      allow write: if isSuperAdmin();
+    }
+
+    // Default Deny
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

@@ -146,6 +146,9 @@ class _TelaSincronizacaoState extends State<TelaSincronizacao> {
 
         if (urlFotoFirebase != null) {
           pacoteParaNuvem['url_foto'] = urlFotoFirebase;
+        } else if (dados['tem_foto_anexada'] == true) {
+          pacoteParaNuvem['erro_sincronizacao_foto'] = true;
+          pacoteParaNuvem['mensagem_erro'] = 'Foto nao sincronizada - reenvio pendente';
         }
 
         await FirebaseFirestore.instance

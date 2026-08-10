@@ -401,11 +401,16 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
     try {
       DateTime agora = DateTime.now();
       String mesAtual = "${agora.month}_${agora.year}";
+      Map<String, dynamic>? dadosPredio;
+
+      // Busca 1: por nome exato
       var query = await FirebaseFirestore.instance
           .collection('predios')
           .where('nome', isEqualTo: widget.condominio)
           .limit(1)
           .get();
+
+      // Busca 2: por campo 'condominio' (legado)
       if (query.docs.isEmpty) {
         query = await FirebaseFirestore.instance
             .collection('predios')
@@ -413,22 +418,39 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
             .limit(1)
             .get();
       }
-      if (query.docs.isNotEmpty) {
-        var dados = query.docs.first.data();
-        List<dynamic> lotes = dados['lotes_fechados'] ?? [];
 
+      // Busca 3: varre e compara case-insensitive
+      if (query.docs.isEmpty) {
+        var todos = await FirebaseFirestore.instance
+            .collection('predios')
+            .where('admin_id', isNotEqualTo: '')
+            .limit(500)
+            .get();
+        for (var doc in todos.docs) {
+          var d = doc.data();
+          String nome = (d['nome'] ?? '').toString().toLowerCase();
+          if (nome == widget.condominio.toLowerCase()) {
+            dadosPredio = d;
+            break;
+          }
+        }
+      } else {
+        dadosPredio = query.docs.first.data();
+      }
+
+      if (dadosPredio != null && mounted) {
+        List<dynamic> lotes = dadosPredio['lotes_fechados'] ?? [];
         double limite = 1.0;
-        if (dados.containsKey('limite_consumo_alerta')) {
-          limite = (dados['limite_consumo_alerta'] as num).toDouble();
+        if (dadosPredio.containsKey('limite_consumo_alerta') &&
+            dadosPredio['limite_consumo_alerta'] != null) {
+          limite = (dadosPredio['limite_consumo_alerta'] as num).toDouble();
         }
 
-        if (mounted) {
-          setState(() {
-            loteFechado = lotes.contains(mesAtual);
-            limiteConsumoCustomizado = limite;
-            if (loteFechado) _focusNode.unfocus();
-          });
-        }
+        setState(() {
+          loteFechado = lotes.contains(mesAtual);
+          limiteConsumoCustomizado = limite;
+          if (loteFechado) _focusNode.unfocus();
+        });
       }
     } catch (e) {
       debugPrint("Erro ao verificar trava do lote: $e");

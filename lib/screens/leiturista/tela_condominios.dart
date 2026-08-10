@@ -84,58 +84,60 @@ class _TelaCondominiosState extends State<TelaCondominios>
       try {
         String? urlFotoFirebase;
         String? caminhoLocal = dados['caminho_foto_local'];
-        bool falhaNoUploadDaFoto = false;
 
         if (caminhoLocal != null) {
-          try {
-            if (!caminhoLocal.startsWith('base64:')) {
-              io.File arquivoLocal = io.File(caminhoLocal);
-              if (await arquivoLocal.exists()) {
+          const int maxTentativas = 3;
+          int tentativa = 0;
+
+          while (tentativa < maxTentativas && urlFotoFirebase == null) {
+            try {
+              if (!caminhoLocal.startsWith('base64:')) {
+                io.File arquivoLocal = io.File(caminhoLocal);
+                if (await arquivoLocal.exists()) {
+                  final ref = FirebaseStorage.instance.ref().child(
+                    'comprovantes/foto_${DateTime.now().millisecondsSinceEpoch}.jpg',
+                  );
+                  await ref
+                      .putFile(
+                        arquivoLocal,
+                        SettableMetadata(contentType: 'image/jpeg'),
+                      )
+                      .timeout(const Duration(seconds: 30));
+                  urlFotoFirebase = await ref.getDownloadURL();
+                  await arquivoLocal.delete();
+                }
+              } else {
+                final Uint8List imageBytes = base64Decode(
+                  caminhoLocal.replaceAll('base64:', ''),
+                );
                 final ref = FirebaseStorage.instance.ref().child(
                   'comprovantes/foto_${DateTime.now().millisecondsSinceEpoch}.jpg',
                 );
-                await ref
-                    .putFile(
-                      arquivoLocal,
+                final tarefa = await ref
+                    .putData(
+                      imageBytes,
                       SettableMetadata(contentType: 'image/jpeg'),
                     )
-                    .timeout(const Duration(seconds: 15));
-
-                urlFotoFirebase = await ref.getDownloadURL();
-                await arquivoLocal.delete();
+                    .timeout(const Duration(seconds: 30));
+                urlFotoFirebase = await tarefa.ref.getDownloadURL();
               }
-            } else {
-              final Uint8List imageBytes = base64Decode(
-                caminhoLocal.replaceAll('base64:', ''),
-              );
-              final ref = FirebaseStorage.instance.ref().child(
-                'comprovantes/foto_${DateTime.now().millisecondsSinceEpoch}.jpg',
-              );
-              final tarefa = await ref
-                  .putData(
-                    imageBytes,
-                    SettableMetadata(contentType: 'image/jpeg'),
-                  )
-                  .timeout(const Duration(seconds: 15));
-
-              urlFotoFirebase = await tarefa.ref.getDownloadURL();
+            } catch (e) {
+              tentativa++;
+              debugPrint("Retry foto ($tentativa/$maxTentativas): $e");
+              if (tentativa < maxTentativas) {
+                await Future.delayed(Duration(seconds: tentativa * 3));
+              }
             }
-          } catch (fotoError) {
-            debugPrint(
-              "⚠️ Falha ao subir foto (Apto ${dados['apartamento']}): $fotoError",
-            );
-            falhaNoUploadDaFoto = true;
-            ultimoErro = "Falha no upload da foto, enviando apenas texto...";
           }
+
         }
 
-        if (dados['tem_foto_anexada'] == true && falhaNoUploadDaFoto) {
-          ultimoErro =
-              "Apto ${dados['apartamento']}: Aguardando conexão estável para subir imagem de auditoria.";
-          continue;
+        DateTime dataLeitura;
+        try {
+          dataLeitura = DateTime.parse(dados['data_hora_string']);
+        } catch (_) {
+          dataLeitura = DateTime.now();
         }
-
-        DateTime dataLeitura = DateTime.parse(dados['data_hora_string']);
         String mesAno = "${dataLeitura.month}_${dataLeitura.year}";
         String idUnicoDoc =
             "${dados['condominio']}_${dados['apartamento']}_${dados['medidor']}_$mesAno"
@@ -159,6 +161,7 @@ class _TelaCondominiosState extends State<TelaCondominios>
           pacote['url_foto'] = urlFotoFirebase;
         } else if (dados['tem_foto_anexada'] == true) {
           pacote['erro_sincronizacao_foto'] = true;
+          pacote['mensagem_erro'] = 'Foto nao sincronizada - reenvio pendente';
         }
 
         await FirebaseFirestore.instance

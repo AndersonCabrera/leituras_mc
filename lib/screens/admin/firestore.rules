@@ -1,34 +1,75 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Usuários podem ler e atualizar seus próprios dados.
-    match /usuarios/{userId} {
-      allow read, update: if request.auth != null && request.auth.uid == userId;
-      // Super admins podem criar usuários. Admins podem criar leituristas.
-      allow create: if request.auth != null; 
+    function isAutenticado() {
+      return request.auth != null;
     }
 
-    // Administradoras só podem ser lidas por usuários autenticados.
+    function getDadosUsuario() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
+    }
+
+    function isSuperAdmin() {
+      return isAutenticado() && getDadosUsuario().cargo == 'super_admin';
+    }
+
+    function isGestorDaAdministradora(idAdminPayload) {
+      let user = getDadosUsuario();
+      return isAutenticado() && user.cargo == 'admin' && user.id_administradora == idAdminPayload;
+    }
+
+    match /configuracoes_marca/{adminId} {
+      allow read: if isAutenticado();
+      allow update: if isGestorDaAdministradora(adminId) &&
+                    (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['plano_premium']));
+      allow create, delete: if isSuperAdmin();
+    }
+
     match /administradoras/{adminId} {
-      allow read: if request.auth != null;
-      // A criação/edição é feita pelo Super Admin.
+      allow read: if isAutenticado();
+      allow write: if isSuperAdmin();
     }
 
-    // Regras para Prédios
+    match /usuarios/{userId} {
+      allow read: if isAutenticado();
+      allow create: if isAutenticado();
+      allow update, delete: if isSuperAdmin() || isGestorDaAdministradora(resource.data.id_administradora);
+    }
+
     match /predios/{predioId} {
-      // Permite leitura se o usuário estiver logado e o admin_id do prédio for o seu.
-      allow read: if request.auth != null && resource.data.admin_id == request.auth.uid;
-      // Permite criar um prédio se o admin_id do novo prédio for o UID do usuário logado.
-      allow create: if request.auth != null && request.resource.data.admin_id == request.auth.uid;
-      // Permite atualizar/excluir se o admin_id existente for o UID do usuário.
-      allow update, delete: if request.auth != null && resource.data.admin_id == request.auth.uid;
+      allow read: if isAutenticado();
+      allow create: if isGestorDaAdministradora(request.resource.data.admin_id);
+      allow update, delete: if isGestorDaAdministradora(resource.data.admin_id);
     }
 
-    // Leituras podem ser criadas por usuários autenticados.
     match /leituras/{leituraId} {
-      allow read, write, delete: if request.auth != null;
+      allow read: if isAutenticado();
+      allow create: if isAutenticado() &&
+                    request.resource.data.keys().hasAll(['condominio', 'apartamento', 'medidor', 'leitura_atual']) &&
+                    (request.resource.data.consumo == null || request.resource.data.consumo >= 0 || request.resource.data.correcao_manual == true);
+      allow update: if isAutenticado();
+      allow delete: if isAutenticado() && getDadosUsuario().cargo == 'admin';
+    }
+
+    match /notificacoes_enviadas/{notificacaoId} {
+      allow read: if isGestorDaAdministradora(resource.data.id_administradora) || isSuperAdmin();
+      allow create: if isGestorDaAdministradora(request.resource.data.id_administradora) || isSuperAdmin();
+      allow update, delete: if false;
+    }
+
+    match /assinaturas/{idAdministradora} {
+      allow read: if isAutenticado() && (isGestorDaAdministradora(idAdministradora) || isSuperAdmin());
+      allow write: if isSuperAdmin();
+    }
+
+    match /pagamentos/{pagamentoId} {
+      allow read: if isAutenticado();
+      allow write: if isSuperAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
