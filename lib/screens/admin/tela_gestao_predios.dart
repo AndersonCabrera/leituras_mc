@@ -131,33 +131,25 @@ class TelaGestaoPredios extends StatelessWidget {
                     style: TextStyle(color: theme.textTheme.bodyLarge?.color),
                   ),
                   subtitle: Text(
-                    'Limite para foto: ${limite.toStringAsFixed(1)} m³\nEquipe: ${data['leiturista_nome'] ?? 'Não vinculada'}',
+                    'Limite: ${limite.toStringAsFixed(1)} m³ | Equipe: ${data['leiturista_nome'] ?? 'Nao vinculada'}',
                     style: TextStyle(color: theme.textTheme.bodyMedium?.color),
                   ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.edit, color: Colors.grey),
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => TelaFormularioPredio(
-                                predioId: doc.id,
-                                predioData: data,
-                                adminId: adminId,
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                        onPressed: () => _confirmarExclusaoRapida(context, doc.id),
-                      ),
-                    ],
+                  trailing: IconButton(
+                    icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                    onPressed: () => _confirmarExclusaoRapida(context, doc.id),
                   ),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => TelaFormularioPredio(
+                          predioId: doc.id,
+                          predioData: data,
+                          adminId: adminId,
+                        ),
+                      ),
+                    );
+                  },
                 ),
               );
             },
@@ -350,12 +342,18 @@ class _TelaFormularioPredioState extends State<TelaFormularioPredio> {
   List<String> _apartamentos = [];
   final _apartamentoCtrl = TextEditingController();
 
+  // Leituristas
+  List<Map<String, dynamic>> _leituristasDisponiveis = [];
+  List<String> _leituristasVinculados = []; // UIDs
+  List<String> _leituristasNomes = []; // Nomes para exibição
+
   bool _isLoading = false;
   bool get _isEditing => widget.predioId != null;
 
   @override
   void initState() {
     super.initState();
+    _carregarLeituristasDisponiveis();
     if (_isEditing && widget.predioData != null) {
       _nomeCtrl.text = widget.predioData!['nome'] ?? '';
       _enderecoCtrl.text = widget.predioData!['endereco'] ?? '';
@@ -368,7 +366,36 @@ class _TelaFormularioPredioState extends State<TelaFormularioPredio> {
       _temEletricidade =
           widget.predioData!['tem_medidor_eletricidade'] ?? false;
 
+      // Carregar leituristas vinculados
+      final vinculados = widget.predioData!['leituristas_permitidos'];
+      if (vinculados != null && vinculados is List) {
+        _leituristasVinculados = List<String>.from(vinculados.map((e) => e.toString()));
+      }
+      final nomes = widget.predioData!['leiturista_nome'];
+      if (nomes != null && nomes is String && nomes.isNotEmpty) {
+        _leituristasNomes = nomes.split(', ').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+      }
+
       _carregarApartamentos();
+    }
+  }
+
+  Future<void> _carregarLeituristasDisponiveis() async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('usuarios')
+        .where('id_administradora', isEqualTo: widget.adminId)
+        .where('cargo', isEqualTo: 'leiturista')
+        .get();
+    if (mounted) {
+      setState(() {
+        _leituristasDisponiveis = snapshot.docs.map((doc) {
+          final data = doc.data();
+          return {
+            'uid': doc.id,
+            'nome': data['nome'] ?? 'Sem nome',
+          };
+        }).toList();
+      });
     }
   }
 
@@ -423,6 +450,8 @@ class _TelaFormularioPredioState extends State<TelaFormularioPredio> {
         'tem_medidor_agua': _temAgua,
         'tem_medidor_gas': _temGas,
         'tem_medidor_eletricidade': _temEletricidade,
+        'leituristas_permitidos': _leituristasVinculados,
+        'leiturista_nome': _leituristasNomes.join(', '),
         'data_cadastro': _isEditing
             ? widget.predioData!['data_cadastro']
             : FieldValue.serverTimestamp(),
@@ -571,10 +600,14 @@ class _TelaFormularioPredioState extends State<TelaFormularioPredio> {
                   'Apartamentos',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
-                TextButton.icon(
-                  icon: const Icon(Icons.file_upload_outlined),
-                  label: const Text('Importar'),
-                  onPressed: _mostrarDialogoImportacao,
+                Row(
+                  children: [
+                    TextButton.icon(
+                      icon: const Icon(Icons.file_upload_outlined, size: 18),
+                      label: const Text('Importar', style: TextStyle(fontSize: 13)),
+                      onPressed: _mostrarDialogoImportacao,
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -582,9 +615,16 @@ class _TelaFormularioPredioState extends State<TelaFormularioPredio> {
             if (!_isEditing) _buildGerenciadorApartamentos(),
             if (_isEditing)
               const Text(
-                'A gestão de apartamentos (adicionar/remover) deve ser feita em uma ferramenta dedicada para evitar inconsistências com leituras existentes.',
+                'A gestao de apartamentos (adicionar/remover) deve ser feita em uma ferramenta dedicada para evitar inconsistencias com leituras existentes.',
                 style: TextStyle(color: Colors.grey),
               ),
+            const SizedBox(height: 24),
+            const Text(
+              'Leituristas Vinculados (max. 4)',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            _buildGerenciadorLeituristas(),
             const SizedBox(height: 24),
             SizedBox(
               width: double.infinity,
@@ -695,6 +735,92 @@ class _TelaFormularioPredioState extends State<TelaFormularioPredio> {
             },
             child: const Text('Importar'),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGerenciadorLeituristas() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey.shade300),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (_leituristasVinculados.isEmpty)
+            const Text(
+              'Nenhum leiturista vinculado. Selecione abaixo.',
+              style: TextStyle(color: Colors.grey, fontSize: 13),
+            ),
+          if (_leituristasVinculados.isNotEmpty) ...[
+            Wrap(
+              spacing: 8.0,
+              runSpacing: 4.0,
+              children: List.generate(_leituristasVinculados.length, (index) {
+                final uid = _leituristasVinculados[index];
+                final nome = index < _leituristasNomes.length
+                    ? _leituristasNomes[index]
+                    : uid;
+                return Chip(
+                  label: Text(nome),
+                  deleteIcon: const Icon(Icons.close, size: 18),
+                  onDeleted: () {
+                    setState(() {
+                      _leituristasVinculados.removeAt(index);
+                      if (index < _leituristasNomes.length) {
+                        _leituristasNomes.removeAt(index);
+                      }
+                    });
+                  },
+                  backgroundColor: Colors.blue.shade50,
+                );
+              }),
+            ),
+            const SizedBox(height: 8),
+          ],
+          if (_leituristasDisponiveis.isEmpty)
+            const Text(
+              'Nenhum leiturista cadastrado na equipe.',
+              style: TextStyle(color: Colors.orange, fontSize: 12),
+            ),
+          if (_leituristasDisponiveis.isNotEmpty &&
+              _leituristasVinculados.length < 4)
+            DropdownButtonFormField<String>(
+              decoration: const InputDecoration(
+                labelText: 'Adicionar Leiturista',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              items: _leituristasDisponiveis
+                  .where((l) => !_leituristasVinculados.contains(l['uid']))
+                  .map((l) => DropdownMenuItem(
+                        value: l['uid'] as String,
+                        child: Text(l['nome'] as String),
+                      ))
+                  .toList(),
+              onChanged: (uid) {
+                if (uid != null) {
+                  final leiturista = _leituristasDisponiveis.firstWhere(
+                    (l) => l['uid'] == uid,
+                  );
+                  setState(() {
+                    _leituristasVinculados.add(uid);
+                    _leituristasNomes.add(leiturista['nome'] as String);
+                  });
+                }
+              },
+            ),
+          if (_leituristasVinculados.length >= 4)
+            const Padding(
+              padding: EdgeInsets.only(top: 4),
+              child: Text(
+                'Limite maximo de 4 leituristas atingido.',
+                style: TextStyle(color: Colors.red, fontSize: 12),
+              ),
+            ),
         ],
       ),
     );
