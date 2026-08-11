@@ -22,15 +22,16 @@ service cloud.firestore {
     // 1. Configuracoes de Marca
     match /configuracoes_marca/{adminId} {
       allow read: if isAutenticado();
-      allow update: if isGestorDaAdministradora(adminId) &&
-                    (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['plano_premium']));
-      allow create, delete: if isSuperAdmin();
+      allow create: if isSuperAdmin();
+      allow update, delete: if isSuperAdmin() || isGestorDaAdministradora(adminId);
     }
 
     // 2. Administradoras
     match /administradoras/{adminId} {
       allow read: if isAutenticado();
-      allow write: if isSuperAdmin();
+      allow create: if isSuperAdmin();
+      allow update: if isSuperAdmin() || isGestorDaAdministradora(adminId);
+      allow delete: if isSuperAdmin();
     }
 
     // 3. Usuarios
@@ -40,11 +41,17 @@ service cloud.firestore {
       allow update, delete: if isSuperAdmin() || isGestorDaAdministradora(resource.data.id_administradora);
     }
 
-    // 4. Predios — usa 'admin_id' que e o campo que o app envia
+    // 4. Predios — admin e super_admin podem tudo
     match /predios/{predioId} {
       allow read: if isAutenticado();
-      allow create: if isGestorDaAdministradora(request.resource.data.admin_id);
-      allow update, delete: if isGestorDaAdministradora(resource.data.admin_id);
+      allow create: if isSuperAdmin() || isGestorDaAdministradora(request.resource.data.admin_id);
+      allow update, delete: if isSuperAdmin() || isGestorDaAdministradora(resource.data.admin_id);
+
+      // Subcolecao de apartamentos
+      match /apartamentos/{apartamentoId} {
+        allow read: if isAutenticado();
+        allow create, update, delete: if isSuperAdmin() || isGestorDaAdministradora(get(/databases/$(database)/documents/predios/$(predioId)).data.admin_id);
+      }
     }
 
     // 5. Leituras
@@ -54,19 +61,19 @@ service cloud.firestore {
                     request.resource.data.keys().hasAll(['condominio', 'apartamento', 'medidor', 'leitura_atual']) &&
                     (request.resource.data.consumo == null || request.resource.data.consumo >= 0 || request.resource.data.correcao_manual == true);
       allow update: if isAutenticado();
-      allow delete: if isAutenticado() && getDadosUsuario().cargo == 'admin';
+      allow delete: if isSuperAdmin() || isAutenticado() && getDadosUsuario().cargo == 'admin';
     }
 
-    // 6. Notificacoes
+    // 6. Notificacoes — admin pode gerenciar as suas
     match /notificacoes_enviadas/{notificacaoId} {
-      allow read: if isGestorDaAdministradora(resource.data.id_administradora) || isSuperAdmin();
-      allow create: if isGestorDaAdministradora(request.resource.data.id_administradora) || isSuperAdmin();
+      allow read: if isSuperAdmin() || isGestorDaAdministradora(resource.data.id_administradora);
+      allow create: if isSuperAdmin() || isGestorDaAdministradora(request.resource.data.id_administradora);
       allow update, delete: if false;
     }
 
     // 7. Assinaturas
     match /assinaturas/{idAdministradora} {
-      allow read: if isAutenticado() && (isGestorDaAdministradora(idAdministradora) || isSuperAdmin());
+      allow read: if isAutenticado() && (isSuperAdmin() || isGestorDaAdministradora(idAdministradora));
       allow write: if isSuperAdmin();
     }
 

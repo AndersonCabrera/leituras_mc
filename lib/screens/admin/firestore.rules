@@ -39,8 +39,13 @@ service cloud.firestore {
 
     match /predios/{predioId} {
       allow read: if isAutenticado();
-      allow create: if isGestorDaAdministradora(request.resource.data.admin_id);
-      allow update, delete: if isGestorDaAdministradora(resource.data.admin_id);
+      allow create: if isGestorDaAdministradora(request.resource.data.admin_id) || isSuperAdmin();
+      allow update, delete: if isGestorDaAdministradora(resource.data.admin_id) || isSuperAdmin();
+
+      match /apartamentos/{apartamentoId} {
+        allow read: if isAutenticado();
+        allow create, update, delete: if isGestorDaAdministradora(get(/databases/$(database)/documents/predios/$(predioId)).data.admin_id) || isSuperAdmin();
+      }
     }
 
     match /leituras/{leituraId} {
