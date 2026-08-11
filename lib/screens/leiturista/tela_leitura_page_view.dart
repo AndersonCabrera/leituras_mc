@@ -403,39 +403,58 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
       String mesAtual = "${agora.month}_${agora.year}";
       Map<String, dynamic>? dadosPredio;
 
-      // Busca 1: por nome exato
+      debugPrint("=== _verificarLoteFechado ===");
+      debugPrint("widget.condominio: '${widget.condominio}'");
+
+      // Busca 1: por campo 'nome'
       var query = await FirebaseFirestore.instance
           .collection('predios')
           .where('nome', isEqualTo: widget.condominio)
           .limit(1)
           .get();
+      debugPrint("Busca por 'nome': ${query.docs.length} resultado(s)");
 
-      // Busca 2: por campo 'condominio' (legado)
+      // Busca 2: por campo 'nome_predio'
+      if (query.docs.isEmpty) {
+        query = await FirebaseFirestore.instance
+            .collection('predios')
+            .where('nome_predio', isEqualTo: widget.condominio)
+            .limit(1)
+            .get();
+        debugPrint("Busca por 'nome_predio': ${query.docs.length} resultado(s)");
+      }
+
+      // Busca 3: por campo 'condominio' (legado)
       if (query.docs.isEmpty) {
         query = await FirebaseFirestore.instance
             .collection('predios')
             .where('condominio', isEqualTo: widget.condominio)
             .limit(1)
             .get();
+        debugPrint("Busca por 'condominio': ${query.docs.length} resultado(s)");
       }
 
-      // Busca 3: varre e compara case-insensitive
+      // Busca 4: varre e compara case-insensitive em ambos 'nome' e 'nome_predio'
       if (query.docs.isEmpty) {
+        debugPrint("Busca 4: varrendo todos os predios...");
         var todos = await FirebaseFirestore.instance
             .collection('predios')
-            .where('admin_id', isNotEqualTo: '')
             .limit(500)
             .get();
         for (var doc in todos.docs) {
           var d = doc.data();
-          String nome = (d['nome'] ?? '').toString().toLowerCase();
-          if (nome == widget.condominio.toLowerCase()) {
+          String nome1 = (d['nome'] ?? '').toString().toLowerCase();
+          String nome2 = (d['nome_predio'] ?? '').toString().toLowerCase();
+          String alvo = widget.condominio.toLowerCase();
+          if (nome1 == alvo || nome2 == alvo) {
             dadosPredio = d;
+            debugPrint("Encontrado via busca 4! nome='${d['nome']}', nome_predio='${d['nome_predio']}', limite='${d['limite_consumo_alerta']}'");
             break;
           }
         }
       } else {
         dadosPredio = query.docs.first.data();
+        debugPrint("Predio encontrado: nome='${dadosPredio!['nome']}', limite_consumo_alerta='${dadosPredio['limite_consumo_alerta']}'");
       }
 
       if (dadosPredio != null && mounted) {
@@ -445,12 +464,15 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
             dadosPredio['limite_consumo_alerta'] != null) {
           limite = (dadosPredio['limite_consumo_alerta'] as num).toDouble();
         }
+        debugPrint("Limite final: $limite");
 
         setState(() {
           loteFechado = lotes.contains(mesAtual);
           limiteConsumoCustomizado = limite;
           if (loteFechado) _focusNode.unfocus();
         });
+      } else {
+        debugPrint("NENHUM predio encontrado! Limite continua em 1.0");
       }
     } catch (e) {
       debugPrint("Erro ao verificar trava do lote: $e");

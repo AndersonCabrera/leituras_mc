@@ -72,7 +72,9 @@ class _TelaImportacaoMassaState extends State<TelaImportacaoMassa> {
 
       await FirebaseFirestore.instance.collection('predios').add({
         'admin_id': widget.idAdministradora,
+        'id_administradora': widget.idAdministradora,
         'nome': _nomePredioCtrl.text.trim().toUpperCase(),
+        'nome_predio': _nomePredioCtrl.text.trim().toUpperCase(),
         'endereco': _enderecoCtrl.text.trim(),
         'limite_consumo_alerta': 1.0,
         'medidores': medidores,

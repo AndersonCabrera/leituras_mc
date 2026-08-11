@@ -414,7 +414,9 @@ class _TelaFormularioPredioState extends State<TelaFormularioPredio> {
 
       final dadosPredio = {
         'admin_id': widget.adminId,
+        'id_administradora': widget.adminId,
         'nome': _nomeCtrl.text.trim(),
+        'nome_predio': _nomeCtrl.text.trim(),
         'endereco': _enderecoCtrl.text.trim(),
         'cnpj': _cnpjCtrl.text.trim(),
         'limite_consumo_alerta': limite,
@@ -850,7 +852,10 @@ class _TelaVincularPrediosState extends State<TelaVincularPredios> {
         await FirebaseFirestore.instance
             .collection('predios')
             .doc(predioId)
-            .update({'admin_id': widget.adminId});
+            .update({
+              'admin_id': widget.adminId,
+              'id_administradora': widget.adminId,
+            });
       }
 
       if (mounted) {

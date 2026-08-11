@@ -390,7 +390,7 @@ class _TelaCondominiosState extends State<TelaCondominios>
                       final medidores = (dados['tipos_medicao'] as List?) ?? [];
                       final apartamentos =
                           (dados['apartamentos'] as List?) ?? [];
-                      final nome = dados['nome_predio'] as String? ?? '';
+                      final nome = (dados['nome_predio'] ?? dados['nome'] ?? '') as String;
 
                       return _CartaoPredio(
                         nome: nome,
