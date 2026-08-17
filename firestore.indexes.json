@@ -1,0 +1,45 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "leituras",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "id_administradora", "order": "ASCENDING" },
+        { "fieldPath": "tem_foto_anexada", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "leituras",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "condominio", "order": "ASCENDING" },
+        { "fieldPath": "data_hora", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "leituras",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "condominio", "order": "ASCENDING" },
+        { "fieldPath": "apartamento", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "predios",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "id_administradora", "order": "ASCENDING" },
+        { "fieldPath": "leituristas_permitidos", "arrayConfig": "CONTAINS" }
+      ]
+    },
+    {
+      "collectionGroup": "usuarios",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "id_administradora", "order": "ASCENDING" },
+        { "fieldPath": "cargo", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

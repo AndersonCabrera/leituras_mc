@@ -1,0 +1,31 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Fotos de comprovantes de leitura
+    // Aceita: foto_{timestamp}.jpg ou {idUnicoDoc}.jpg
+    match /comprovantes/{filename} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*')
+        && (filename.matches('foto_[0-9]+\\.jpg')
+            || filename.matches('[a-z0-9_]+_[a-z0-9_]+_[a-z0-9_]+_[0-9]+_[0-9]+\\.jpg'));
+      allow delete: if request.auth != null;
+    }
+
+    // Fotos de perfil de usuário
+    match /usuarios/{userId}/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // Auditoria (somente leitura para autenticados, escrita restrita)
+    match /auditoria/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+  }
+}

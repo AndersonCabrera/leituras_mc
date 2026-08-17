@@ -1,9 +1,10 @@
-const admin = require('firebase-admin');
-const https = require('https');
-const crypto = require('crypto');
+const { verificarAdmin } = require('./middleware/auth');
+const { setCorsHeaders } = require('./middleware/cors');
 
 function mpRequest(method, path, body) {
   return new Promise((resolve, reject) => {
+    const https = require('https');
+    const crypto = require('crypto');
     const data = body ? JSON.stringify(body) : null;
     const options = {
       hostname: 'api.mercadopago.com',
@@ -52,14 +53,15 @@ function parseBody(req) {
 }
 
 module.exports = async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'OPTIONS, POST');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  setCorsHeaders(req, res);
 
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Apenas POST é permitido.' });
   }
+
+  const auth = await verificarAdmin(req, res);
+  if (!auth) return;
 
   try {
     const bodyData = await parseBody(req);
@@ -69,6 +71,10 @@ module.exports = async (req, res) => {
       return res.status(400).json({
         error: 'id_administradora, plano e email são obrigatórios.',
       });
+    }
+
+    if (auth.userData.cargo !== 'super_admin' && auth.userData.id_administradora !== id_administradora) {
+      return res.status(403).json({ error: 'Sem permissão para criar assinatura para esta empresa.' });
     }
 
     const precos = { premium: 127.0, super_premium: 297.0 };
@@ -97,18 +103,8 @@ module.exports = async (req, res) => {
       });
     }
 
-    if (!admin.apps.length) {
-      admin.initializeApp({
-        credential: admin.credential.cert({
-          projectId: process.env.FIREBASE_PROJECT_ID,
-          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-          privateKey: process.env.FIREBASE_PRIVATE_KEY
-            ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
-            : undefined,
-        }),
-      });
-    }
-
+    const { getFirebaseAdmin } = require('./middleware/auth');
+    const admin = getFirebaseAdmin();
     const db = admin.firestore();
     const pix = mpBody.point_of_interaction?.transaction_data || {};
 
@@ -145,11 +141,9 @@ module.exports = async (req, res) => {
       valor: precos[plano],
     });
   } catch (error) {
-    console.error('Erro:', error);
+    console.error('Erro ao criar assinatura:', error.message);
     return res.status(500).json({
-      error: 'Erro inesperado',
-      details: error.message,
-      stack: error.stack,
+      error: 'Erro inesperado ao criar assinatura.',
     });
   }
 };

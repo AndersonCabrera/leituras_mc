@@ -1,0 +1,66 @@
+{
+  "data": "2026-08-16T17:17:02.016Z",
+  "stats": {
+    "totalPredios": 21,
+    "jaCorretos": 12,
+    "corrigidos": 9,
+    "erros": 0,
+    "leiturasCorrigidas": 0
+  },
+  "detalhes": [
+    {
+      "id": "Hr5qynfPITDPELFTkYmz",
+      "nome": "Condado de Monte Carlo",
+      "admin_id": "admin_001",
+      "motivo": "admin_id vazio → copiado de id_administradora (admin_001)"
+    },
+    {
+      "id": "OHeZyqplOoQzaVxW7xnm",
+      "nome": "Residencial Villagio Di Itália",
+      "admin_id": "admin_001",
+      "motivo": "admin_id vazio → copiado de id_administradora (admin_001)"
+    },
+    {
+      "id": "VyNGkpOYK2o5BXerxym7",
+      "nome": "Condomínio Edifício Residencial Condado de Monte Carlo",
+      "admin_id": "admin_001",
+      "motivo": "admin_id vazio → copiado de id_administradora (admin_001)"
+    },
+    {
+      "id": "aBfbex6fm5A1dAKR7idr",
+      "nome": "Edificio Residencial Vittorio Emanuele",
+      "admin_id": "admin_001",
+      "motivo": "admin_id vazio → copiado de id_administradora (admin_001)"
+    },
+    {
+      "id": "avb7yVGIRv1KnIDRmQd5",
+      "nome": "Edificio Paraiso",
+      "admin_id": "admin_001",
+      "motivo": "admin_id vazio → copiado de id_administradora (admin_001)"
+    },
+    {
+      "id": "c5H0XqD7uhFEwGa9jRyu",
+      "nome": "Le Privilége",
+      "admin_id": "admin_001",
+      "motivo": "admin_id vazio → copiado de id_administradora (admin_001)"
+    },
+    {
+      "id": "gHmToPCWPj9lGErYuW6g",
+      "nome": "Condado de Livia",
+      "admin_id": "admin_001",
+      "motivo": "admin_id vazio → copiado de id_administradora (admin_001)"
+    },
+    {
+      "id": "goYHZs0FF0U4UnMtvzIY",
+      "nome": "Edificio José Pés",
+      "admin_id": "admin_001",
+      "motivo": "admin_id vazio → copiado de id_administradora (admin_001)"
+    },
+    {
+      "id": "ye7WZEYNOqbStASCrvUe",
+      "nome": "Condominio Edificio Spazzio Nobre",
+      "admin_id": "admin_001",
+      "motivo": "admin_id vazio → copiado de id_administradora (admin_001)"
+    }
+  ]
+}

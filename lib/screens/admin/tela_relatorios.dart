@@ -157,6 +157,9 @@ class TelaRelatoriosPredio extends StatefulWidget {
 
 class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
   String filtroAtual = 'Todos';
+  int _mesSelecionado = DateTime.now().month;
+  int _anoSelecionado = DateTime.now().year;
+  bool _mostrarTodas = false;
 
   String _gerarPrefixoMedidores(List<QueryDocumentSnapshot> leituras) {
     Set<String> tiposEncontrados = {};
@@ -797,10 +800,15 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting)
             return const Center(child: CircularProgressIndicator());
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty)
-            return const Center(child: Text('Nenhuma leitura encontrada.'));
 
-          var leiturasBrutas = snapshot.data!.docs;
+          List<QueryDocumentSnapshot> leiturasBrutas = [];
+          if (snapshot.hasData) {
+            leiturasBrutas.addAll(snapshot.data!.docs);
+          }
+
+          if (leiturasBrutas.isEmpty) {
+            return const Center(child: Text('Nenhuma leitura encontrada para este prédio.'));
+          }
           leiturasBrutas.sort((a, b) {
             Timestamp dataA =
                 (a.data() as Map<String, dynamic>)['data_hora'] as Timestamp? ??
@@ -823,21 +831,23 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
               mapaLeiturasUnicas[chaveUnica] = doc;
           }
 
-          DateTime hoje = DateTime.now();
           var leiturasFiltradas = mapaLeiturasUnicas.values.where((doc) {
             var dados = doc.data() as Map<String, dynamic>;
             DateTime dataLeitura =
                 (dados['data_hora'] as Timestamp? ?? Timestamp.now()).toDate();
-            if (dataLeitura.month != hoje.month ||
-                dataLeitura.year != hoje.year)
-              return false;
+            if (!_mostrarTodas) {
+              if (dataLeitura.month != _mesSelecionado ||
+                  dataLeitura.year != _anoSelecionado)
+                return false;
+            }
             if (filtroAtual == 'Todos') return true;
-            String medidorStr = dados['medidor'].toString().toLowerCase();
+            String medidorStr = dados['medidor'].toString().toLowerCase()
+                .replaceAll('á', 'a').replaceAll('ã', 'a').replaceAll('é', 'e').replaceAll('ê', 'e');
             if (filtroAtual == 'Água' &&
-                (medidorStr.contains('água') || medidorStr.contains('agua')))
+                medidorStr.contains('agua'))
               return true;
             if (filtroAtual == 'Gás' &&
-                (medidorStr.contains('gás') || medidorStr.contains('gas')))
+                medidorStr.contains('gas'))
               return true;
             if (filtroAtual == 'Energia' &&
                 (medidorStr.contains('luz') ||
@@ -846,6 +856,11 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
               return true;
             return false;
           }).toList();
+
+          List<String> meses = [
+            '', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+            'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+          ];
 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -856,35 +871,94 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
                   vertical: 10,
                 ),
                 color: Colors.white,
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: ['Todos', 'Água', 'Gás', 'Energia'].map((
-                      String filtro,
-                    ) {
-                      bool isSelected = filtroAtual == filtro;
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 10),
-                        child: ChoiceChip(
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<int>(
+                            value: _mesSelecionado,
+                            decoration: const InputDecoration(
+                              labelText: 'Mês',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                              contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            ),
+                            items: List.generate(12, (i) => DropdownMenuItem(
+                              value: i + 1,
+                              child: Text(meses[i + 1]),
+                            )),
+                            onChanged: _mostrarTodas ? null : (v) {
+                              if (v != null) setState(() => _mesSelecionado = v);
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: DropdownButtonFormField<int>(
+                            value: _anoSelecionado,
+                            decoration: const InputDecoration(
+                              labelText: 'Ano',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                              contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            ),
+                            items: List.generate(6, (i) {
+                              int ano = DateTime.now().year - 2 + i;
+                              return DropdownMenuItem(value: ano, child: Text('$ano'));
+                            }),
+                            onChanged: _mostrarTodas ? null : (v) {
+                              if (v != null) setState(() => _anoSelecionado = v);
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        FilterChip(
                           label: Text(
-                            filtro,
+                            _mostrarTodas ? 'Todos' : 'Filtrar',
                             style: TextStyle(
-                              color: isSelected
-                                  ? Colors.white
-                                  : Colors.blueGrey,
-                              fontWeight: FontWeight.bold,
+                              color: _mostrarTodas ? Colors.white : Colors.blueGrey,
+                              fontSize: 12,
                             ),
                           ),
-                          selected: isSelected,
+                          selected: _mostrarTodas,
                           selectedColor: const Color(0xFF0D47A1),
-                          backgroundColor: Colors.blueGrey.shade50,
-                          onSelected: (bool selected) {
-                            if (selected) setState(() => filtroAtual = filtro);
-                          },
+                          onSelected: (v) => setState(() => _mostrarTodas = v),
                         ),
-                      );
-                    }).toList(),
-                  ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: ['Todos', 'Água', 'Gás', 'Energia'].map((
+                          String filtro,
+                        ) {
+                          bool isSelected = filtroAtual == filtro;
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 10),
+                            child: ChoiceChip(
+                              label: Text(
+                                filtro,
+                                style: TextStyle(
+                                  color: isSelected
+                                      ? Colors.white
+                                      : Colors.blueGrey,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              selected: isSelected,
+                              selectedColor: const Color(0xFF0D47A1),
+                              backgroundColor: Colors.blueGrey.shade50,
+                              onSelected: (bool selected) {
+                                if (selected) setState(() => filtroAtual = filtro);
+                              },
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ],
                 ),
               ),
               Container(

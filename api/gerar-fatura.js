@@ -1,9 +1,10 @@
-const admin = require('firebase-admin');
-const https = require('https');
-const crypto = require('crypto');
+const { verificarAdminDaEmpresa, getFirebaseAdmin } = require('./middleware/auth');
+const { setCorsHeaders } = require('./middleware/cors');
 
 function mpRequest(body) {
   return new Promise((resolve, reject) => {
+    const https = require('https');
+    const crypto = require('crypto');
     const data = JSON.stringify(body);
     const options = {
       hostname: 'api.mercadopago.com',
@@ -50,9 +51,7 @@ function parseBody(req) {
 }
 
 module.exports = async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'OPTIONS, POST');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  setCorsHeaders(req, res);
 
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') {
@@ -60,23 +59,17 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const { id_administradora } = await parseBody(req);
+    const bodyData = await parseBody(req);
+    const { id_administradora } = bodyData;
+
     if (!id_administradora) {
       return res.status(400).json({ error: 'id_administradora obrigatório.' });
     }
 
-    if (!admin.apps.length) {
-      admin.initializeApp({
-        credential: admin.credential.cert({
-          projectId: process.env.FIREBASE_PROJECT_ID,
-          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-          privateKey: process.env.FIREBASE_PRIVATE_KEY
-            ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
-            : undefined,
-        }),
-      });
-    }
+    const auth = await verificarAdminDaEmpresa(req, res, id_administradora);
+    if (!auth) return;
 
+    const admin = getFirebaseAdmin();
     const db = admin.firestore();
     const assinaturaDoc = await db.collection('assinaturas').doc(id_administradora).get();
 
@@ -102,7 +95,7 @@ module.exports = async (req, res) => {
     });
 
     if (mpStatus !== 200 && mpStatus !== 201) {
-      return res.status(500).json({ error: 'Erro MP', details: mpBody });
+      return res.status(500).json({ error: 'Erro MP' });
     }
 
     const pix = mpBody.point_of_interaction?.transaction_data || {};
@@ -134,7 +127,7 @@ module.exports = async (req, res) => {
       valor,
     });
   } catch (error) {
-    console.error('Erro:', error);
-    return res.status(500).json({ error: 'Erro inesperado', details: error.message });
+    console.error('Erro ao gerar fatura:', error.message);
+    return res.status(500).json({ error: 'Erro inesperado ao gerar fatura.' });
   }
 };

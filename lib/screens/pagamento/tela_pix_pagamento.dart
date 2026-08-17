@@ -32,7 +32,6 @@ class TelaPixPagamento extends StatefulWidget {
 
 class _TelaPixPagamentoState extends State<TelaPixPagamento> {
   Timer? _pollTimer;
-  bool _pago = false;
 
   @override
   void initState() {
@@ -46,7 +45,6 @@ class _TelaPixPagamentoState extends State<TelaPixPagamento> {
     );
     if (status['status_assinatura'] == 'active' && mounted) {
       _pollTimer?.cancel();
-      setState(() => _pago = true);
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(

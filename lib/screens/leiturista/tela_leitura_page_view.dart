@@ -3,9 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:convert';
-import 'dart:io' as io;
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:path_provider/path_provider.dart';
 import '../../services/banco_local.dart';
 import '../../core/formatters.dart';
 
@@ -454,7 +452,7 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
         }
       } else {
         dadosPredio = query.docs.first.data();
-        debugPrint("Predio encontrado: nome='${dadosPredio!['nome']}', limite_consumo_alerta='${dadosPredio['limite_consumo_alerta']}'");
+        debugPrint("Predio encontrado: nome='${dadosPredio['nome']}', limite_consumo_alerta='${dadosPredio['limite_consumo_alerta']}'");
       }
 
       if (dadosPredio != null && mounted) {
@@ -513,8 +511,14 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
       }
 
       var docs = query.docs.where((doc) {
-        final d = doc.data() as Map<String, dynamic>;
-        return d['medidor'].toString().contains(nomeMedidor);
+        final d = doc.data();
+        // Ignora leituras rejeitadas na auditoria (apartamento volta a pendente)
+        if (d['status_auditoria'] == 'rejeitada') return false;
+        String medidorSalvo = d['medidor'].toString().toLowerCase()
+            .replaceAll('á', 'a').replaceAll('ã', 'a').replaceAll('é', 'e').replaceAll('ê', 'e');
+        String medidorBusca = nomeMedidor.toLowerCase()
+            .replaceAll('á', 'a').replaceAll('ã', 'a').replaceAll('é', 'e').replaceAll('ê', 'e');
+        return medidorSalvo.contains(medidorBusca);
       }).toList();
 
       if (docs.isEmpty) {
@@ -527,13 +531,13 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
       }
 
       docs.sort((a, b) {
-        final ta = (a.data() as Map<String, dynamic>)['data_hora'] as Timestamp;
-        final tb = (b.data() as Map<String, dynamic>)['data_hora'] as Timestamp;
+        final ta = a.data()['data_hora'] as Timestamp;
+        final tb = b.data()['data_hora'] as Timestamp;
         return tb.compareTo(ta);
       });
 
       final recente = docs.first;
-      final dadosRecentes = recente.data() as Map<String, dynamic>;
+      final dadosRecentes = recente.data();
       final dataLeitura = (dadosRecentes['data_hora'] as Timestamp).toDate();
       final hoje = DateTime.now();
 
@@ -548,15 +552,11 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
           if (docs.length > 1) {
             final anterior = docs.elementAt(1);
             final dataAnt =
-                ((anterior.data() as Map<String, dynamic>)['data_hora']
-                        as Timestamp)
-                    .toDate();
+                (anterior.data()['data_hora'] as Timestamp).toDate();
             referenciaAnterior =
                 '${dataAnt.month.toString().padLeft(2, '0')}/${dataAnt.year}';
             leituraAnterior =
-                ((anterior.data() as Map<String, dynamic>)['leitura_atual'] ??
-                        0.0)
-                    .toDouble();
+                (anterior.data()['leitura_atual'] ?? 0.0).toDouble();
           } else {
             leituraAnterior = 0.0;
             referenciaAnterior = 'Inicial';
@@ -599,9 +599,10 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
   Future<void> _tirarFotoManual() async {
     final foto = await _picker.pickImage(
       source: ImageSource.camera,
-      imageQuality: 40,
-      maxWidth: 800,
-      maxHeight: 800,
+      imageQuality: 75,
+      maxWidth: 1600,
+      maxHeight: 1600,
+      preferredCameraDevice: CameraDevice.rear,
     );
     if (foto != null) setState(() => fotoComprovante = foto);
   }
@@ -609,9 +610,9 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
   Future<void> _abrirGaleria() async {
     final foto = await _picker.pickImage(
       source: ImageSource.gallery,
-      imageQuality: 40,
-      maxWidth: 800,
-      maxHeight: 800,
+      imageQuality: 75,
+      maxWidth: 1600,
+      maxHeight: 1600,
     );
     if (foto != null) setState(() => fotoComprovante = foto);
   }
@@ -704,14 +705,7 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
     setState(() => salvando = true);
     try {
       String? caminhoFotoLocal;
-      if (fotoComprovante != null && !kIsWeb) {
-        final dir = await getApplicationDocumentsDirectory();
-        final nome = 'foto_${DateTime.now().millisecondsSinceEpoch}.jpg';
-        caminhoFotoLocal = '${dir.path}/$nome';
-        await io.File(
-          caminhoFotoLocal,
-        ).writeAsBytes(await fotoComprovante!.readAsBytes());
-      } else if (fotoComprovante != null && kIsWeb) {
+      if (fotoComprovante != null) {
         final bytes = await fotoComprovante!.readAsBytes();
         caminhoFotoLocal = 'base64:${base64Encode(bytes)}';
       }
@@ -1627,7 +1621,6 @@ class _ItemMenu extends StatelessWidget {
   final String titulo;
   final String subtitulo;
   final VoidCallback onTap;
-  final bool carregando;
 
   const _ItemMenu({
     required this.icon,
@@ -1635,7 +1628,6 @@ class _ItemMenu extends StatelessWidget {
     required this.titulo,
     required this.subtitulo,
     required this.onTap,
-    this.carregando = false,
   });
 
   @override
@@ -1643,7 +1635,7 @@ class _ItemMenu extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return GestureDetector(
-      onTap: carregando ? null : onTap,
+      onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
@@ -1659,16 +1651,7 @@ class _ItemMenu extends StatelessWidget {
                 color: cor.withOpacity(0.12),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: carregando
-                  ? SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: cor,
-                      ),
-                    )
-                  : Icon(icon, color: cor, size: 20),
+              child: Icon(icon, color: cor, size: 20),
             ),
             const SizedBox(width: 12),
             Expanded(

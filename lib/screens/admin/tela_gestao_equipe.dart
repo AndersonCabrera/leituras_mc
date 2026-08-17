@@ -4,9 +4,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:firebase_core/firebase_core.dart';
 
 import '../../models/plano.dart';
+import '../../config/app_config.dart';
 
 class TelaListaEquipe extends StatelessWidget {
   final String idAdministradora;
@@ -530,8 +530,9 @@ class _TelaCadastroLeituristaState extends State<TelaCadastroLeiturista> {
           'Telefone invalido. Informe no minimo 10 digitos com DDD.');
       return;
     }
-    if (email.isEmpty || !email.contains('@')) {
-      _mostrarErro('Email invalido.');
+    final emailRegex = RegExp(r'^[\w\.-]+@[\w\.-]+\.\w{2,}$');
+    if (email.isEmpty || !emailRegex.hasMatch(email)) {
+      _mostrarErro('Email inválido. Informe um email válido (ex: nome@dominio.com).');
       return;
     }
     if (senha.length < 6) {
@@ -542,32 +543,36 @@ class _TelaCadastroLeituristaState extends State<TelaCadastroLeiturista> {
     setState(() => _salvando = true);
 
     try {
-      FirebaseApp appFantasma = await Firebase.initializeApp(
-        name: 'appFantasma_${DateTime.now().millisecondsSinceEpoch}',
-        options: Firebase.app().options,
-      );
-      UserCredential credencial = await FirebaseAuth.instanceFor(
-        app: appFantasma,
-      ).createUserWithEmailAndPassword(
-        email: email,
-        password: senha,
-      );
-      await appFantasma.delete();
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        throw Exception('Sessão expirada. Faça login novamente.');
+      }
+      final idToken = await user.getIdToken();
 
-      await FirebaseFirestore.instance
-          .collection('usuarios')
-          .doc(credencial.user!.uid)
-          .set({
-        'nome': '$nome $sobrenome',
-        'nome_primeiro': nome,
-        'nome_sobrenome': sobrenome,
-        'email': email,
-        'cpf': cpf.replaceAll(RegExp(r'[^\d]'), ''),
-        'telefone': telefone.replaceAll(RegExp(r'[^\d]'), ''),
-        'cargo': 'leiturista',
-        'id_administradora': widget.idAdministradora,
-        'data_cadastro': FieldValue.serverTimestamp(),
-      });
+      final response = await http
+          .post(
+            Uri.parse('${AppConfig.vercelApiUrl}/criarUsuario'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $idToken',
+            },
+            body: jsonEncode({
+              'nome': '$nome $sobrenome',
+              'email': email,
+              'senha': senha,
+              'cargo': 'leiturista',
+              'id_administradora': widget.idAdministradora,
+              'cpf': cpf.replaceAll(RegExp(r'[^\d]'), ''),
+              'telefone': telefone.replaceAll(RegExp(r'[^\d]'), ''),
+            }),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      if (response.statusCode != 200) {
+        throw Exception(
+          jsonDecode(response.body)['error'] ?? 'Erro ao registrar leiturista.',
+        );
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

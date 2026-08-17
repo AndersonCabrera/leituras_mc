@@ -1,9 +1,8 @@
-const admin = require('firebase-admin');
+const { verificarAdminDaEmpresa, getFirebaseAdmin } = require('./middleware/auth');
+const { setCorsHeaders } = require('./middleware/cors');
 
 module.exports = async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'OPTIONS, GET');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  setCorsHeaders(req, res);
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
@@ -13,29 +12,14 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: 'id_administradora é obrigatório.' });
     }
 
-    if (!admin.apps.length) {
-      admin.initializeApp({
-        credential: admin.credential.cert({
-          projectId: process.env.FIREBASE_PROJECT_ID,
-          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-          privateKey: process.env.FIREBASE_PRIVATE_KEY
-            ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
-            : undefined,
-        }),
-      });
-    }
+    const auth = await verificarAdminDaEmpresa(req, res, id_administradora);
+    if (!auth) return;
 
-    const assinaturaDoc = await admin
-      .firestore()
-      .collection('assinaturas')
-      .doc(id_administradora)
-      .get();
+    const admin = getFirebaseAdmin();
+    const db = admin.firestore();
 
-    const adminDoc = await admin
-      .firestore()
-      .collection('administradoras')
-      .doc(id_administradora)
-      .get();
+    const assinaturaDoc = await db.collection('assinaturas').doc(id_administradora).get();
+    const adminDoc = await db.collection('administradoras').doc(id_administradora).get();
 
     const assinatura = assinaturaDoc.exists ? assinaturaDoc.data() : null;
     const administradora = adminDoc.exists ? adminDoc.data() : null;
@@ -53,7 +37,6 @@ module.exports = async (req, res) => {
     return res.status(200).json({
       plano,
       status_assinatura: status,
-      preco_centavos: precos[plano] || 0,
       limite_condominios: limitesCond[plano] || 3,
       limite_leituristas: limitesLeit[plano] || 3,
       data_expiracao: assinatura?.data_expiracao || null,
@@ -61,7 +44,7 @@ module.exports = async (req, res) => {
       ultima_fatura: ultimaFatura,
     });
   } catch (error) {
-    console.error('Erro ao verificar status:', error);
+    console.error('Erro ao verificar status:', error.message);
     return res.status(500).json({ error: 'Erro interno.' });
   }
 };

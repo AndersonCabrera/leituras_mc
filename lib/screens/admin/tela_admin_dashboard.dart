@@ -15,10 +15,94 @@ import '../pagamento/tela_planos.dart';
 import '../pagamento/tela_status_assinatura.dart';
 import '../../models/plano.dart';
 import '../../core/theme.dart';
+import 'tela_debug_dados.dart';
+import 'tela_fotos_pendentes.dart';
 
 class TelaAdminDashboard extends StatelessWidget {
   final String idAdministradora;
   const TelaAdminDashboard({super.key, required this.idAdministradora});
+
+  Future<void> _migrarLeituras(BuildContext context) async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Migrar Leituras'),
+        content: const Text(
+          'Vincular leituras antigas ao empresa atual?\n\n'
+          'Isso adicionará o campo "id_administradora" em leituras que não possuem.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Executar')),
+        ],
+      ),
+    );
+
+    if (confirmar != true || !context.mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      int atualizadas = 0;
+      int semAdmin = 0;
+
+      final prediosSnap = await FirebaseFirestore.instance
+          .collection('predios')
+          .where('id_administradora', isEqualTo: idAdministradora)
+          .get();
+
+      final mapaPredios = <String, String>{};
+      for (final doc in prediosSnap.docs) {
+        final dados = doc.data();
+        final nome = (dados['nome_predio'] ?? dados['nome'] ?? '').toString().toLowerCase();
+        if (nome.isNotEmpty) {
+          mapaPredios[nome] = idAdministradora;
+        }
+      }
+
+      final leiturasSnap = await FirebaseFirestore.instance
+          .collection('leituras')
+          .get();
+
+      for (final doc in leiturasSnap.docs) {
+        final dados = doc.data();
+        if (dados['id_administradora'] != null) continue;
+
+        final condominio = (dados['condominio'] ?? '').toString().toLowerCase();
+        if (mapaPredios.containsKey(condominio)) {
+          await doc.reference.update({'id_administradora': idAdministradora});
+          atualizadas++;
+        } else {
+          semAdmin++;
+        }
+      }
+
+      if (context.mounted) {
+        Navigator.pop(context);
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Migração Concluída'),
+            content: Text('Leituras atualizadas: $atualizadas\nSem prédio: $semAdmin'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
 
   Future<void> _abrirPersonalizacaoPremium(BuildContext context) async {
     showDialog(
@@ -159,6 +243,18 @@ class TelaAdminDashboard extends StatelessWidget {
         elevation: 0,
         actions: [
           const BotaoTrocaTema(corIcone: Colors.white),
+          IconButton(
+            icon: const Icon(Icons.bug_report_rounded, color: Colors.white70),
+            tooltip: 'Debug Dados',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => TelaDebugDados(idAdministradora: idAdministradora),
+                ),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.logout_rounded, color: Colors.white),
             tooltip: 'Sair',
@@ -407,6 +503,28 @@ class TelaAdminDashboard extends StatelessWidget {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 15),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _actionCard(
+                          context,
+                          'Fotos Pendentes',
+                          'Verificar Erros',
+                          Icons.photo_library_outlined,
+                          Colors.orange.shade600,
+                          () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => TelaFotosPendentes(idAdministradora: idAdministradora),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 15),
+                      const Expanded(child: SizedBox()),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -454,6 +572,19 @@ class TelaAdminDashboard extends StatelessWidget {
                         ),
                       ),
                     ),
+                    isDark,
+                    corCartao,
+                    corTextoTitulo,
+                    corBorda,
+                  ),
+                  const SizedBox(height: 10),
+                  _configTile(
+                    context,
+                    Icons.sync_rounded,
+                    'Migrar Leituras',
+                    'Corrigir leituras sem empresa vinculada',
+                    Colors.orange,
+                    () => _migrarLeituras(context),
                     isDark,
                     corCartao,
                     corTextoTitulo,

@@ -12,11 +12,26 @@ class BancoLocal {
     String caminho = p.join(await getDatabasesPath(), 'fila_leituras_mc.db');
     _db = await openDatabase(
       caminho,
-      version: 1,
+      version: 2,
       onCreate: (banco, versao) async {
         await banco.execute(
-          'CREATE TABLE fila (id INTEGER PRIMARY KEY AUTOINCREMENT, dados TEXT)',
+          'CREATE TABLE fila ('
+          'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+          'dados TEXT, '
+          'em_processamento INTEGER DEFAULT 0, '
+          'processado_em INTEGER'
+          ')',
         );
+      },
+      onUpgrade: (banco, versaoAntiga, versaoNova) async {
+        if (versaoAntiga < 2) {
+          await banco.execute(
+            'ALTER TABLE fila ADD COLUMN em_processamento INTEGER DEFAULT 0',
+          );
+          await banco.execute(
+            'ALTER TABLE fila ADD COLUMN processado_em INTEGER',
+          );
+        }
       },
     );
     return _db!;
@@ -41,8 +56,40 @@ class BancoLocal {
       return List.generate(fila.length, (i) => {'id': i, 'dados': fila[i]});
     } else {
       final banco = await db;
-      return await banco.query('fila', orderBy: 'id ASC');
+      final agora = DateTime.now().millisecondsSinceEpoch;
+      final limiteStale = agora - 10 * 60 * 1000;
+      return await banco.query(
+        'fila',
+        where: 'em_processamento = 0 OR processado_em IS NULL OR processado_em < ?',
+        whereArgs: [limiteStale],
+        orderBy: 'id ASC',
+      );
     }
+  }
+
+  /// Reivindica (atomico) um item para processamento. Retorna true se o item
+  /// foi bloqueado por esta chamada (evita que sync manual e silenciosa
+  /// processem o mesmo item em paralelo).
+  static Future<bool> reivindicar(int id) async {
+    if (kIsWeb) return true;
+    final banco = await db;
+    final agora = DateTime.now().millisecondsSinceEpoch;
+    final result = await banco.rawUpdate(
+      'UPDATE fila SET em_processamento = 1, processado_em = ? '
+      'WHERE id = ? AND (em_processamento = 0 OR processado_em IS NULL OR processado_em < ?)',
+      [agora, id, agora - 10 * 60 * 1000],
+    );
+    return result > 0;
+  }
+
+  /// Libera um item previamente reivindicado (falha: mantém na fila p/ retry).
+  static Future<void> liberar(int id) async {
+    if (kIsWeb) return;
+    final banco = await db;
+    await banco.rawUpdate(
+      'UPDATE fila SET em_processamento = 0 WHERE id = ?',
+      [id],
+    );
   }
 
   static Future<void> remover(int id, String dadosJson) async {

@@ -1,4 +1,5 @@
-const admin = require('firebase-admin');
+const { verificarSuperAdmin, getFirebaseAdmin } = require('./middleware/auth');
+const { setCorsHeaders } = require('./middleware/cors');
 
 function parseBody(req) {
   return new Promise((resolve, reject) => {
@@ -16,14 +17,15 @@ function parseBody(req) {
 }
 
 module.exports = async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'OPTIONS, POST');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  setCorsHeaders(req, res);
 
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Apenas POST.' });
   }
+
+  const auth = await verificarSuperAdmin(req, res);
+  if (!auth) return;
 
   try {
     const bodyData = await parseBody(req);
@@ -33,19 +35,9 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: 'id_administradora obrigatório.' });
     }
 
-    if (!admin.apps.length) {
-      admin.initializeApp({
-        credential: admin.credential.cert({
-          projectId: process.env.FIREBASE_PROJECT_ID,
-          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-          privateKey: process.env.FIREBASE_PRIVATE_KEY
-            ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
-            : undefined,
-        }),
-      });
-    }
-
+    const admin = getFirebaseAdmin();
     const db = admin.firestore();
+
     await db.collection('assinaturas').doc(id_administradora).update({
       status: 'cancelled',
     });
@@ -56,7 +48,7 @@ module.exports = async (req, res) => {
 
     return res.status(200).json({ message: 'Assinatura cancelada com sucesso.' });
   } catch (error) {
-    console.error('Erro ao cancelar:', error);
+    console.error('Erro ao cancelar assinatura:', error.message);
     return res.status(500).json({ error: 'Erro ao cancelar assinatura.' });
   }
 };

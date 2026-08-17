@@ -2,15 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import '../../services/banco_local.dart';
 import 'tela_sincronizacao.dart';
 import 'tela_leitura_page_view.dart';
 import '../auth/tela_login.dart';
-import '../../core/theme.dart'; // 💡 IMPORTAÇÃO DO TEMA
+import '../../core/theme.dart';
 
 class TelaCondominios extends StatefulWidget {
   final String idAdministradora;
@@ -22,6 +24,9 @@ class TelaCondominios extends StatefulWidget {
 
 class _TelaCondominiosState extends State<TelaCondominios>
     with TickerProviderStateMixin {
+  // Lock anti-race condition para sincronização
+  static bool _syncEmAndamento = false;
+
   Timer? _timerSync;
   bool _sincronizandoAgora = false;
   int _totalPendentes = 0;
@@ -66,14 +71,25 @@ class _TelaCondominiosState extends State<TelaCondominios>
   }
 
   Future<void> _sincronizarSilenciosamente() async {
-    if (_sincronizandoAgora) return;
+    if (_sincronizandoAgora || _syncEmAndamento) return;
 
     final fila = await BancoLocal.lerFila();
     if (mounted) setState(() => _totalPendentes = fila.length);
     if (fila.isEmpty) return;
 
+    // Alerta se muitos pendentes (possível problema de sincronização)
+    if (fila.length >= 10 && mounted) {
+      _mostrarToast(
+        '⚠️ ${fila.length} leituras pendentes. Verifique sua conexão.',
+        Colors.orange.shade900,
+      );
+    }
+
     setState(() => _sincronizandoAgora = true);
+    _syncEmAndamento = true;
     int sucessoCount = 0;
+    int falhaCount = 0;
+    int falhaFotoCount = 0;
     String? ultimoErro;
 
     for (var linha in fila) {
@@ -81,9 +97,14 @@ class _TelaCondominiosState extends State<TelaCondominios>
       String itemJson = linha['dados'];
       Map<String, dynamic> dados = jsonDecode(itemJson);
 
+      // Lock atômico no SQLite: evita processar item já reivindicado pela
+      // sync manual ou por uma rodada anterior ainda em execução.
+      if (!await BancoLocal.reivindicar(idLocal)) continue;
+
       try {
         String? urlFotoFirebase;
         String? caminhoLocal = dados['caminho_foto_local'];
+        String? erroUploadFoto;
 
         if (caminhoLocal != null) {
           const int maxTentativas = 3;
@@ -91,6 +112,8 @@ class _TelaCondominiosState extends State<TelaCondominios>
 
           while (tentativa < maxTentativas && urlFotoFirebase == null) {
             try {
+              // Force token refresh before long upload
+              await FirebaseAuth.instance.currentUser?.getIdToken(true);
               if (!caminhoLocal.startsWith('base64:')) {
                 io.File arquivoLocal = io.File(caminhoLocal);
                 if (await arquivoLocal.exists()) {
@@ -102,34 +125,76 @@ class _TelaCondominiosState extends State<TelaCondominios>
                         arquivoLocal,
                         SettableMetadata(contentType: 'image/jpeg'),
                       )
-                      .timeout(const Duration(seconds: 30));
+                      .timeout(const Duration(seconds: 120));
                   urlFotoFirebase = await ref.getDownloadURL();
                   await arquivoLocal.delete();
+                } else {
+                  erroUploadFoto = 'Arquivo local não encontrado (pode ter sido deletado pelo SO)';
+                  break; // Não retry se arquivo não existe
                 }
               } else {
-                final Uint8List imageBytes = base64Decode(
-                  caminhoLocal.replaceAll('base64:', ''),
-                );
-                final ref = FirebaseStorage.instance.ref().child(
-                  'comprovantes/foto_${DateTime.now().millisecondsSinceEpoch}.jpg',
-                );
+                // Verificar auth state antes de tentar
+                final user = FirebaseAuth.instance.currentUser;
+                debugPrint('🔍 [SILENT SYNC] User: ${user?.uid}, Email: ${user?.email}');
+                if (user == null) {
+                  debugPrint('🔴 [SILENT SYNC] ERRO: Usuário não autenticado!');
+                  erroUploadFoto = 'Usuário não autenticado';
+                  break;
+                }
+                
+                final base64Str = caminhoLocal.replaceAll('base64:', '');
+                debugPrint('🔍 [SILENT SYNC] Base64 length: ${base64Str.length}');
+                final Uint8List imageBytes = base64Decode(base64Str);
+                debugPrint('🔍 [SILENT SYNC] Decoded bytes length: ${imageBytes.length} (${(imageBytes.length / 1024).toStringAsFixed(1)} KB)');
+                
+                if (imageBytes.length > 10 * 1024 * 1024) {
+                  erroUploadFoto = 'Imagem muito grande: ${imageBytes.length} bytes (max 10MB)';
+                  break;
+                }
+                
+                final timestamp = DateTime.now().millisecondsSinceEpoch;
+                final fileName = 'foto_$timestamp.jpg';
+                debugPrint('🔍 [SILENT SYNC] Uploading file: $fileName');
+                final ref = FirebaseStorage.instance.ref().child('comprovantes/$fileName');
+                debugPrint('🔍 [SILENT SYNC] Ref path: ${ref.fullPath}');
+                
+                // Force token refresh before long upload
+                debugPrint('🔍 [SILENT SYNC] Refreshing auth token...');
+                final token = await user.getIdToken(true);
+                debugPrint('🔍 [SILENT SYNC] Token refreshed: ${token != null ? "OK" : "NULL"}');
+                
+                debugPrint('🔍 [SILENT SYNC] Starting putData...');
                 final tarefa = await ref
                     .putData(
                       imageBytes,
                       SettableMetadata(contentType: 'image/jpeg'),
                     )
-                    .timeout(const Duration(seconds: 30));
+                    .timeout(const Duration(seconds: 120));
+                debugPrint('🔍 [SILENT SYNC] Upload complete, state: ${tarefa.state}, getting download URL...');
                 urlFotoFirebase = await tarefa.ref.getDownloadURL();
+                debugPrint('🔍 [SILENT SYNC] Download URL: $urlFotoFirebase');
+              }
+            } on FirebaseException catch (e) {
+              erroUploadFoto = '[${e.code}] ${e.message}';
+              tentativa++;
+              debugPrint("Retry foto ($tentativa/$maxTentativas): $erroUploadFoto");
+              if (tentativa < maxTentativas) {
+                final delay = Duration(seconds: (pow(2, tentativa) * 3 + Random().nextInt(5)).toInt());
+                await Future.delayed(delay);
               }
             } catch (e) {
+              erroUploadFoto = e.toString();
               tentativa++;
-              debugPrint("Retry foto ($tentativa/$maxTentativas): $e");
+              debugPrint("Retry foto ($tentativa/$maxTentativas): $erroUploadFoto");
               if (tentativa < maxTentativas) {
-                await Future.delayed(Duration(seconds: tentativa * 3));
+                final delay = Duration(seconds: (pow(2, tentativa) * 3 + Random().nextInt(5)).toInt());
+                await Future.delayed(delay);
               }
             }
           }
-
+          if (urlFotoFirebase == null && erroUploadFoto != null) {
+            dados['_erro_upload_foto'] = 'Todas as $maxTentativas tentativas falharam: $erroUploadFoto';
+          }
         }
 
         DateTime dataLeitura;
@@ -155,27 +220,42 @@ class _TelaCondominiosState extends State<TelaCondominios>
           'tem_foto_anexada': dados['tem_foto_anexada'],
           'correcao_manual': dados['correcao_manual'] ?? false,
           'data_hora': Timestamp.fromDate(dataLeitura),
+          'id_administradora': widget.idAdministradora,
+          'status_auditoria': 'pendente',
         };
 
         if (urlFotoFirebase != null) {
           pacote['url_foto'] = urlFotoFirebase;
         } else if (dados['tem_foto_anexada'] == true) {
           pacote['erro_sincronizacao_foto'] = true;
-          pacote['mensagem_erro'] = 'Foto nao sincronizada - reenvio pendente';
+          pacote['mensagem_erro'] = dados['_erro_upload_foto'] ?? 'Foto nao sincronizada - reenvio pendente';
         }
 
         await FirebaseFirestore.instance
             .collection('leituras')
             .doc(idUnicoDoc)
             .set(pacote, SetOptions(merge: true))
-            .timeout(const Duration(seconds: 10));
+            .timeout(const Duration(seconds: 30));
 
-        await BancoLocal.remover(idLocal, itemJson);
-        sucessoCount++;
+        // Só remover da fila se: (não tem foto) OU (foto enviada com sucesso)
+        bool fotoEnviada = urlFotoFirebase != null;
+        bool temFotoAnexada = dados['tem_foto_anexada'] == true;
+        bool deveRemover = !temFotoAnexada || fotoEnviada;
+
+        if (deveRemover) {
+          await BancoLocal.remover(idLocal, itemJson);
+          sucessoCount++;
+        } else {
+          debugPrint("Foto não enviada (silencioso) - mantendo item na fila");
+          await BancoLocal.liberar(idLocal);
+          falhaCount++;
+          if (temFotoAnexada) falhaFotoCount++;
+        }
       } catch (e) {
         debugPrint("❌ Falha fatal no item (Apto ${dados['apartamento']}): $e");
         ultimoErro = "Apto ${dados['apartamento']}: $e";
         if (mounted) setState(() => _isOnline = false);
+        await BancoLocal.liberar(idLocal);
         continue;
       }
     }
@@ -187,8 +267,15 @@ class _TelaCondominiosState extends State<TelaCondominios>
         _totalPendentes = novaFila.length;
         if (sucessoCount > 0) _isOnline = true;
       });
+      _syncEmAndamento = false;
 
-      if (sucessoCount > 0) {
+      // Toast diferenciado para falhas de foto
+      if (falhaFotoCount > 0) {
+        _mostrarToast(
+          '⚠️ $sucessoCount leitura(s) sincronizada(s), mas $falhaFotoCount foto(s) falharam. Abra "Fotos Pendentes" no painel admin.',
+          Colors.orange.shade900,
+        );
+      } else if (sucessoCount > 0) {
         _mostrarToast(
           '✓ $sucessoCount leitura(s) sincronizada(s) com sucesso!',
           Colors.green.shade700,
@@ -333,7 +420,7 @@ class _TelaCondominiosState extends State<TelaCondominios>
                 onSincronizar: _sincronizarSilenciosamente,
                 onVerPendentes: () => Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => const TelaSincronizacao()),
+                  MaterialPageRoute(builder: (_) => TelaSincronizacao(idAdministradora: widget.idAdministradora)),
                 ).then((_) => _carregarPendentes()),
               ),
             ),
@@ -346,7 +433,7 @@ class _TelaCondominiosState extends State<TelaCondominios>
                   onVerDetalhes: () => Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => const TelaSincronizacao(),
+                      builder: (_) => TelaSincronizacao(idAdministradora: widget.idAdministradora),
                     ),
                   ).then((_) => _carregarPendentes()),
                 ),
@@ -387,7 +474,15 @@ class _TelaCondominiosState extends State<TelaCondominios>
                     delegate: SliverChildBuilderDelegate((context, index) {
                       final predio = predios[index];
                       final dados = predio.data() as Map<String, dynamic>;
-                      final medidores = (dados['tipos_medicao'] as List?) ?? [];
+                      
+                      // Fallback: se tipos_medicao não existe, criar a partir dos booleanos
+                      List medidores = (dados['tipos_medicao'] as List?) ?? [];
+                      if (medidores.isEmpty) {
+                        if (dados['tem_medidor_agua'] == true) medidores.add('Agua');
+                        if (dados['tem_medidor_gas'] == true) medidores.add('Gas');
+                        if (dados['tem_medidor_eletricidade'] == true) medidores.add('Luz');
+                      }
+                      
                       final apartamentos =
                           (dados['apartamentos'] as List?) ?? [];
                       final nome = (dados['nome_predio'] ?? dados['nome'] ?? '') as String;

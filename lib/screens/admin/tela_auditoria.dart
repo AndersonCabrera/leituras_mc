@@ -36,10 +36,11 @@ class TelaAuditoria extends StatelessWidget {
             );
           }
 
-          // Filtramos em memória para tirar da lista os que já foram aprovados pelo gestor
+          // Filtramos em memória para tirar da lista os já aprovados ou rejeitados
           var docsPendentes = snapshot.data!.docs.where((doc) {
             var dados = doc.data() as Map<String, dynamic>;
-            return dados['status_auditoria'] != 'aprovado';
+            return dados['status_auditoria'] != 'aprovado' &&
+                dados['status_auditoria'] != 'rejeitada';
           }).toList();
 
           if (docsPendentes.isEmpty) {
@@ -72,7 +73,19 @@ class TelaAuditoria extends StatelessWidget {
                         children: [
                           GestureDetector(
                             onTap: () {
-                              if (dados['url_foto'] == null) {
+                              if (dados['url_foto'] != null) {
+                                showDialog(
+                                  context: context,
+                                  builder: (_) => Dialog(
+                                    child: InteractiveViewer(
+                                      child: Image.network(
+                                        dados['url_foto'],
+                                        fit: BoxFit.contain,
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              } else {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
                                     content: Text(
@@ -137,6 +150,42 @@ class TelaAuditoria extends StatelessWidget {
                                     ),
                                   ),
                                 ),
+                                const SizedBox(height: 4),
+                                if (dados['url_foto'] != null)
+                                  Row(
+                                    children: [
+                                      Icon(Icons.check_circle, size: 14, color: Colors.green.shade700),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Foto sincronizada',
+                                        style: TextStyle(fontSize: 12, color: Colors.green.shade700),
+                                      ),
+                                    ],
+                                  )
+                                else if (dados['erro_sincronizacao_foto'] == true)
+                                  Row(
+                                    children: [
+                                      Icon(Icons.error_outline, size: 14, color: Colors.red.shade700),
+                                      const SizedBox(width: 4),
+                                      Expanded(
+                                        child: Text(
+                                          'Erro: ${dados['mensagem_erro'] ?? 'Sincronização falhou'}',
+                                          style: TextStyle(fontSize: 12, color: Colors.red.shade700),
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                else
+                                  Row(
+                                    children: [
+                                      Icon(Icons.hourglass_bottom_rounded, size: 14, color: Colors.orange.shade700),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Foto aguardando sincronização',
+                                        style: TextStyle(fontSize: 12, color: Colors.orange.shade700),
+                                      ),
+                                    ],
+                                  ),
                               ],
                             ),
                           ),
@@ -160,11 +209,17 @@ class TelaAuditoria extends StatelessWidget {
                               'REFAZER',
                               style: TextStyle(fontWeight: FontWeight.bold),
                             ),
-                            onPressed: () async {
+            onPressed: () async {
                               await FirebaseFirestore.instance
                                   .collection('leituras')
                                   .doc(doc.id)
-                                  .delete();
+                                  .update({
+                                'status_auditoria': 'rejeitada',
+                                'motivo_rejeicao':
+                                    'Solicitado refazer pelo gestor',
+                                'data_rejeicao':
+                                    FieldValue.serverTimestamp(),
+                              });
                               if (context.mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(

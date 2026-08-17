@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import '../../config/app_config.dart';
 
 class TelaCriarAcessoCliente extends StatefulWidget {
   final String idAdministradora;
@@ -44,35 +45,50 @@ class _TelaCriarAcessoClienteState extends State<TelaCriarAcessoCliente> {
       );
       return;
     }
+
+    final emailRegex = RegExp(r'^[\w\.-]+@[\w\.-]+\.\w{2,}$');
+    if (!emailRegex.hasMatch(emailController.text.trim())) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Email inválido. Informe um email válido (ex: nome@dominio.com).'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
     setState(() {
       salvando = true;
     });
 
     try {
-      // Usando uma app secundária para criar conta sem deslogar o Super Admin atual
-      FirebaseApp appFantasma = await Firebase.initializeApp(
-        name: 'appFantasma_${DateTime.now().millisecondsSinceEpoch}',
-        options: Firebase.app().options,
-      );
-      UserCredential credencial =
-          await FirebaseAuth.instanceFor(
-            app: appFantasma,
-          ).createUserWithEmailAndPassword(
-            email: emailController.text.trim(),
-            password: senhaController.text.trim(),
-          );
-      await appFantasma.delete();
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        throw Exception('Sessão expirada. Faça login novamente.');
+      }
+      final idToken = await user.getIdToken();
 
-      await FirebaseFirestore.instance
-          .collection('usuarios')
-          .doc(credencial.user!.uid)
-          .set({
-            'nome': nomeController.text.trim(),
-            'email': emailController.text.trim(),
-            'cargo': 'admin',
-            'id_administradora': widget.idAdministradora,
-            'data_cadastro': FieldValue.serverTimestamp(),
-          });
+      final response = await http
+          .post(
+            Uri.parse('${AppConfig.vercelApiUrl}/criarUsuario'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $idToken',
+            },
+            body: jsonEncode({
+              'nome': nomeController.text.trim(),
+              'email': emailController.text.trim(),
+              'senha': senhaController.text.trim(),
+              'cargo': 'admin',
+              'id_administradora': widget.idAdministradora,
+            }),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      if (response.statusCode != 200) {
+        throw Exception(
+          jsonDecode(response.body)['error'] ?? 'Erro ao criar acesso.',
+        );
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -135,6 +151,7 @@ class _TelaCriarAcessoClienteState extends State<TelaCriarAcessoCliente> {
               const SizedBox(height: 15),
               TextField(
                 controller: emailController,
+                keyboardType: TextInputType.emailAddress,
                 decoration: const InputDecoration(
                   labelText: 'Email de Acesso',
                   border: OutlineInputBorder(),

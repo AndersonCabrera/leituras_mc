@@ -1,0 +1,993 @@
+{
+  "data": "2026-08-16T20:25:44.732Z",
+  "acao": "CLEAN_FIELDS",
+  "totalEncontradas": 123,
+  "processadas": 123,
+  "erros": 0,
+  "detalhes": [
+    {
+      "id": "casa_teste_2_101_agua_8_2026",
+      "condominio": "casa teste 2",
+      "apartamento": "101",
+      "medidor": "AGUA",
+      "temErro": true,
+      "mensagemErro": "Retry falhou: Caminho da foto não disponível (não salva localmente)"
+    },
+    {
+      "id": "casa_teste_2_101_luz_8_2026",
+      "condominio": "casa teste 2",
+      "apartamento": "101",
+      "medidor": "LUZ",
+      "temErro": true,
+      "mensagemErro": "Foto nao sincronizada - reenvio pendente"
+    },
+    {
+      "id": "casa_teste_2_102_agua_8_2026",
+      "condominio": "casa teste 2",
+      "apartamento": "102",
+      "medidor": "AGUA",
+      "temErro": true,
+      "mensagemErro": "Foto nao sincronizada - reenvio pendente"
+    },
+    {
+      "id": "casa_teste_2_102_luz_8_2026",
+      "condominio": "casa teste 2",
+      "apartamento": "102",
+      "medidor": "LUZ",
+      "temErro": true,
+      "mensagemErro": "Foto nao sincronizada - reenvio pendente"
+    },
+    {
+      "id": "casa_teste_2_103_agua_8_2026",
+      "condominio": "casa teste 2",
+      "apartamento": "103",
+      "medidor": "AGUA",
+      "temErro": true,
+      "mensagemErro": "Todas as 3 tentativas falharam: [firebase_storage/unknown] An unknown error occurred"
+    },
+    {
+      "id": "casa_teste_2_103_luz_8_2026",
+      "condominio": "casa teste 2",
+      "apartamento": "103",
+      "medidor": "LUZ",
+      "temErro": true,
+      "mensagemErro": "Retry falhou: Caminho da foto não disponível (não salva localmente)"
+    },
+    {
+      "id": "casa_teste_2_104_agua_8_2026",
+      "condominio": "casa teste 2",
+      "apartamento": "104",
+      "medidor": "AGUA",
+      "temErro": true,
+      "mensagemErro": "Todas as 3 tentativas falharam: [firebase_storage/unknown] An unknown error occurred"
+    },
+    {
+      "id": "casa_teste_2_104_luz_8_2026",
+      "condominio": "casa teste 2",
+      "apartamento": "104",
+      "medidor": "LUZ",
+      "temErro": true,
+      "mensagemErro": "Foto nao sincronizada - reenvio pendente"
+    },
+    {
+      "id": "condominio_edificio_com._e_res._oliveira_304_gás_8_2026",
+      "condominio": "Condominio Edificio Com. e Res. Oliveira",
+      "apartamento": "304",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "condominio_edificio_com._e_res._oliveira_401_gás_8_2026",
+      "condominio": "Condominio Edificio Com. e Res. Oliveira",
+      "apartamento": "401",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "condominio_edificio_com._e_res._oliveira_404_gás_8_2026",
+      "condominio": "Condominio Edificio Com. e Res. Oliveira",
+      "apartamento": "404",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "condominio_edificio_com._e_res._oliveira_501_gás_8_2026",
+      "condominio": "Condominio Edificio Com. e Res. Oliveira",
+      "apartamento": "501",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "condominio_edificio_com._e_res._oliveira_502_gás_8_2026",
+      "condominio": "Condominio Edificio Com. e Res. Oliveira",
+      "apartamento": "502",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "condominio_edificio_com._e_res._oliveira_604_gás_8_2026",
+      "condominio": "Condominio Edificio Com. e Res. Oliveira",
+      "apartamento": "604",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "condominio_edificio_com._e_res._oliveira_702_gás_8_2026",
+      "condominio": "Condominio Edificio Com. e Res. Oliveira",
+      "apartamento": "702",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "condominio_edificio_com._e_res._oliveira_703_gás_8_2026",
+      "condominio": "Condominio Edificio Com. e Res. Oliveira",
+      "apartamento": "703",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_residencial_condado_de_monte_carlo_302_gás_7_2026",
+      "condominio": "Edificio Residencial Condado de Monte Carlo",
+      "apartamento": "302",
+      "medidor": "Gás",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_residencial_condado_de_monte_carlo_302_água_7_2026",
+      "condominio": "Edificio Residencial Condado de Monte Carlo",
+      "apartamento": "302",
+      "medidor": "Água",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_residencial_condado_de_monte_carlo_502_gás_7_2026",
+      "condominio": "Edificio Residencial Condado de Monte Carlo",
+      "apartamento": "502",
+      "medidor": "Gás",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_residencial_condado_de_monte_carlo_502_água_7_2026",
+      "condominio": "Edificio Residencial Condado de Monte Carlo",
+      "apartamento": "502",
+      "medidor": "Água",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_residencial_condado_de_monte_carlo_801_água_7_2026",
+      "condominio": "Edificio Residencial Condado de Monte Carlo",
+      "apartamento": "801",
+      "medidor": "Água",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_residencial_condado_de_monte_carlo_902_água_8_2026",
+      "condominio": "Edificio Residencial Condado de Monte Carlo",
+      "apartamento": "902",
+      "medidor": "Água",
+      "temErro": true,
+      "mensagemErro": "Foto nao sincronizada - reenvio pendente"
+    },
+    {
+      "id": "edificio_residencial_condado_de_monte_carlo_zelador_gás_7_2026",
+      "condominio": "Edificio Residencial Condado de Monte Carlo",
+      "apartamento": "Zelador",
+      "medidor": "Gás",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_residencial_condado_de_monte_carlo_zelador_gás_8_2026",
+      "condominio": "Edificio Residencial Condado de Monte Carlo",
+      "apartamento": "Zelador",
+      "medidor": "Gás",
+      "temErro": true,
+      "mensagemErro": "Foto nao sincronizada - reenvio pendente"
+    },
+    {
+      "id": "edificio_spazzio_nobre_301_gás_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "301",
+      "medidor": "Gás",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_spazzio_nobre_401_gás_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "401",
+      "medidor": "Gás",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_spazzio_nobre_401_água_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "401",
+      "medidor": "Água",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_spazzio_nobre_402_gás_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "402",
+      "medidor": "Gás",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_spazzio_nobre_402_água_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "402",
+      "medidor": "Água",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_spazzio_nobre_403_gás_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "403",
+      "medidor": "Gás",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_spazzio_nobre_403_água_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "403",
+      "medidor": "Água",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_spazzio_nobre_502_gás_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "502",
+      "medidor": "Gás",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_spazzio_nobre_502_água_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "502",
+      "medidor": "Água",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_spazzio_nobre_503_gás_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "503",
+      "medidor": "Gás",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_spazzio_nobre_503_água_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "503",
+      "medidor": "Água",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_spazzio_nobre_601_gás_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "601",
+      "medidor": "Gás",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_spazzio_nobre_601_água_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "601",
+      "medidor": "Água",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_spazzio_nobre_602_água_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "602",
+      "medidor": "Água",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_spazzio_nobre_603_gás_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "603",
+      "medidor": "Gás",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_spazzio_nobre_603_água_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "603",
+      "medidor": "Água",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_spazzio_nobre_701_gás_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "701",
+      "medidor": "Gás",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_spazzio_nobre_702_gás_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "702",
+      "medidor": "Gás",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_spazzio_nobre_702_água_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "702",
+      "medidor": "Água",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_spazzio_nobre_703_gás_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "703",
+      "medidor": "Gás",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_spazzio_nobre_703_água_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "703",
+      "medidor": "Água",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_spazzio_nobre_801_gás_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "801",
+      "medidor": "Gás",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_spazzio_nobre_801_água_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "801",
+      "medidor": "Água",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_spazzio_nobre_802_água_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "802",
+      "medidor": "Água",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_spazzio_nobre_803_gás_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "803",
+      "medidor": "Gás",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_spazzio_nobre_803_água_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "803",
+      "medidor": "Água",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "edificio_spazzio_nobre_903_água_7_2026",
+      "condominio": "edificio Spazzio Nobre",
+      "apartamento": "903",
+      "medidor": "Água",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_1001_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "1001",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_1002_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "1002",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_1003_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "1003",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_1005_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "1005",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_1006_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "1006",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_1104_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "1104",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_1105_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "1105",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_1201_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "1201",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_1202_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "1202",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_1205_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "1205",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_301_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "301",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_302_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "302",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_402_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "402",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_403_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "403",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_405_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "405",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_406_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "406",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_503_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "503",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_504_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "504",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_603_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "603",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_604_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "604",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_605_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "605",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_606_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "606",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_703_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "703",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_704_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "704",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_803_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "803",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_804_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "804",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_806_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "806",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_901_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "901",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_902_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "902",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_903_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "903",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_904_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "904",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_905_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "905",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "le_privilege_residence_apt_001_água_8_2026",
+      "condominio": "Le Privilege Residence",
+      "apartamento": "apt 001",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "residencial_e_comercial_virginia_403_gás_8_2026",
+      "condominio": "Residencial e Comercial Virginia",
+      "apartamento": "403",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "residencial_e_comercial_virginia_704_gás_8_2026",
+      "condominio": "Residencial e Comercial Virginia",
+      "apartamento": "704",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "residencial_e_comercial_virginia_705_gás_8_2026",
+      "condominio": "Residencial e Comercial Virginia",
+      "apartamento": "705",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "residencial_villagio_d'italia_1002_gás_8_2026",
+      "condominio": "Residencial Villagio D'italia",
+      "apartamento": "1002",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "residencial_villagio_d'italia_1004_gás_8_2026",
+      "condominio": "Residencial Villagio D'italia",
+      "apartamento": "1004",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "residencial_villagio_d'italia_1102_gás_8_2026",
+      "condominio": "Residencial Villagio D'italia",
+      "apartamento": "1102",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "residencial_villagio_d'italia_1104_gás_7_2026",
+      "condominio": "Residencial Villagio D'italia",
+      "apartamento": "1104",
+      "medidor": "Gás",
+      "temErro": true,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "residencial_villagio_d'italia_1104_gás_8_2026",
+      "condominio": "Residencial Villagio D'italia",
+      "apartamento": "1104",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "residencial_villagio_d'italia_1201_gás_8_2026",
+      "condominio": "Residencial Villagio D'italia",
+      "apartamento": "1201",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "residencial_villagio_d'italia_301_gás_8_2026",
+      "condominio": "Residencial Villagio D'italia",
+      "apartamento": "301",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "residencial_villagio_d'italia_302_gás_8_2026",
+      "condominio": "Residencial Villagio D'italia",
+      "apartamento": "302",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "residencial_villagio_d'italia_403_gás_8_2026",
+      "condominio": "Residencial Villagio D'italia",
+      "apartamento": "403",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "residencial_villagio_d'italia_502_gás_8_2026",
+      "condominio": "Residencial Villagio D'italia",
+      "apartamento": "502",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "residencial_villagio_d'italia_503_gás_8_2026",
+      "condominio": "Residencial Villagio D'italia",
+      "apartamento": "503",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "residencial_villagio_d'italia_603_gás_8_2026",
+      "condominio": "Residencial Villagio D'italia",
+      "apartamento": "603",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "residencial_villagio_d'italia_604_gás_8_2026",
+      "condominio": "Residencial Villagio D'italia",
+      "apartamento": "604",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "residencial_villagio_d'italia_702_gás_8_2026",
+      "condominio": "Residencial Villagio D'italia",
+      "apartamento": "702",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "residencial_villagio_d'italia_703_gás_8_2026",
+      "condominio": "Residencial Villagio D'italia",
+      "apartamento": "703",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "residencial_villagio_d'italia_801_gás_8_2026",
+      "condominio": "Residencial Villagio D'italia",
+      "apartamento": "801",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "residencial_villagio_d'italia_802_gás_8_2026",
+      "condominio": "Residencial Villagio D'italia",
+      "apartamento": "802",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "residencial_villagio_d'italia_803_gás_8_2026",
+      "condominio": "Residencial Villagio D'italia",
+      "apartamento": "803",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "residencial_villagio_d'italia_804_gás_8_2026",
+      "condominio": "Residencial Villagio D'italia",
+      "apartamento": "804",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "residencial_villagio_d'italia_901_gás_8_2026",
+      "condominio": "Residencial Villagio D'italia",
+      "apartamento": "901",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "residencial_villagio_d'italia_903_gás_8_2026",
+      "condominio": "Residencial Villagio D'italia",
+      "apartamento": "903",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "vittorio_emanuele_1001_gás_8_2026",
+      "condominio": "Vittorio Emanuele",
+      "apartamento": "1001",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "vittorio_emanuele_1001_água_8_2026",
+      "condominio": "Vittorio Emanuele",
+      "apartamento": "1001",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "vittorio_emanuele_1002_gás_8_2026",
+      "condominio": "Vittorio Emanuele",
+      "apartamento": "1002",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "vittorio_emanuele_1002_água_8_2026",
+      "condominio": "Vittorio Emanuele",
+      "apartamento": "1002",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "vittorio_emanuele_1102_água_8_2026",
+      "condominio": "Vittorio Emanuele",
+      "apartamento": "1102",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "vittorio_emanuele_1201_gás_8_2026",
+      "condominio": "Vittorio Emanuele",
+      "apartamento": "1201",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "vittorio_emanuele_1201_água_8_2026",
+      "condominio": "Vittorio Emanuele",
+      "apartamento": "1201",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "vittorio_emanuele_302_gás_8_2026",
+      "condominio": "Vittorio Emanuele",
+      "apartamento": "302",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "vittorio_emanuele_302_água_8_2026",
+      "condominio": "Vittorio Emanuele",
+      "apartamento": "302",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "vittorio_emanuele_401_gás_8_2026",
+      "condominio": "Vittorio Emanuele",
+      "apartamento": "401",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "vittorio_emanuele_401_água_8_2026",
+      "condominio": "Vittorio Emanuele",
+      "apartamento": "401",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "vittorio_emanuele_403_gás_8_2026",
+      "condominio": "Vittorio Emanuele",
+      "apartamento": "403",
+      "medidor": "Gás",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "vittorio_emanuele_403_água_8_2026",
+      "condominio": "Vittorio Emanuele",
+      "apartamento": "403",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "vittorio_emanuele_701_água_8_2026",
+      "condominio": "Vittorio Emanuele",
+      "apartamento": "701",
+      "medidor": "Água",
+      "temErro": false,
+      "mensagemErro": "Sem mensagem"
+    },
+    {
+      "id": "vittorio_emanuele_801_água_8_2026",
+      "condominio": "Vittorio Emanuele",
+      "apartamento": "801",
+      "medidor": "Água",
+      "temErro": true,
+      "mensagemErro": "Retry falhou: Caminho da foto não disponível (não salva localmente)"
+    }
+  ]
+}

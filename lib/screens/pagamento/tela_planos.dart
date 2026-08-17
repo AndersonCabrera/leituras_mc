@@ -6,7 +6,6 @@ import 'package:flutter/services.dart';
 import '../../models/plano.dart';
 import '../../services/mercadopago_service.dart';
 import 'tela_pix_pagamento.dart';
-import 'tela_status_assinatura.dart';
 
 class TelaPlanos extends StatefulWidget {
   final String idAdministradora;

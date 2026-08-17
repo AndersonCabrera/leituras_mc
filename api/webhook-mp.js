@@ -1,8 +1,10 @@
-const admin = require('firebase-admin');
-const https = require('https');
+const crypto = require('crypto');
+const { getFirebaseAdmin } = require('./middleware/auth');
+const { setCorsHeaders } = require('./middleware/cors');
 
 function mpGet(path) {
   return new Promise((resolve, reject) => {
+    const https = require('https');
     const options = {
       hostname: 'api.mercadopago.com',
       path,
@@ -41,32 +43,49 @@ function parseBody(req) {
   });
 }
 
+function verificarAssinaturaMP(req) {
+  const webhookSecret = process.env.MP_WEBHOOK_SECRET;
+  if (!webhookSecret) return true;
+
+  const signature = req.headers['x-signature'];
+  if (!signature) return false;
+
+  const parts = {};
+  signature.split(',').forEach(part => {
+    const [key, value] = part.split('=');
+    parts[key] = value;
+  });
+
+  const timestamp = parts.ts;
+  const v1 = parts.v1;
+
+  if (!timestamp || !v1) return false;
+
+  const rawBody = req._rawBody || JSON.stringify(req.body);
+  const payload = `${timestamp}.${rawBody}`;
+  const expected = crypto.createHmac('sha256', webhookSecret).update(payload).digest('hex');
+
+  return v1 === expected;
+}
+
 module.exports = async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'OPTIONS, POST');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  setCorsHeaders(req, res);
 
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Apenas POST.' });
 
   try {
+    if (!verificarAssinaturaMP(req)) {
+      return res.status(401).json({ error: 'Assinatura do Mercado Pago inválida.' });
+    }
+
     const bodyData = await parseBody(req);
     const paymentId = bodyData.data?.id;
     if (!paymentId) return res.status(200).json({ message: 'Sem payment_id.' });
 
-    if (!admin.apps.length) {
-      admin.initializeApp({
-        credential: admin.credential.cert({
-          projectId: process.env.FIREBASE_PROJECT_ID,
-          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-          privateKey: process.env.FIREBASE_PRIVATE_KEY
-            ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
-            : undefined,
-        }),
-      });
-    }
-
+    const admin = getFirebaseAdmin();
     const db = admin.firestore();
+
     const { body: payment } = await mpGet(`/v1/payments/${paymentId}`);
     const externalRef = payment.external_reference;
     if (!externalRef) return res.status(200).json({ message: 'Sem external_reference.' });
@@ -106,7 +125,7 @@ module.exports = async (req, res) => {
     await assinaturaRef.update(updateData);
     return res.status(200).json({ message: `Pagamento ${payment.status} processado.` });
   } catch (error) {
-    console.error('Erro no webhook:', error);
+    console.error('Erro no webhook:', error.message);
     return res.status(200).json({ message: 'Webhook recebido.' });
   }
 };

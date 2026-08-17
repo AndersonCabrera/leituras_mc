@@ -237,17 +237,6 @@ class TelaGestaoPredios extends StatelessWidget {
 
     if (confirmar == true) {
       try {
-        final apartamentos = await FirebaseFirestore.instance
-            .collection('predios')
-            .doc(predioId)
-            .collection('apartamentos')
-            .get();
-        final batch = FirebaseFirestore.instance.batch();
-        for (final doc in apartamentos.docs) {
-          batch.delete(doc.reference);
-        }
-        await batch.commit();
-
         await FirebaseFirestore.instance
             .collection('predios')
             .doc(predioId)
@@ -342,6 +331,27 @@ class _TelaFormularioPredioState extends State<TelaFormularioPredio> {
   List<String> _apartamentos = [];
   final _apartamentoCtrl = TextEditingController();
 
+  int _extrairChaveOrdem(String apto) {
+    final limpo = apto.replaceAll(RegExp(r'[^0-9]'), '');
+    if (limpo.length >= 3 && limpo.length <= 4) {
+      return int.tryParse(limpo) ?? 0;
+    }
+    return 0;
+  }
+
+  void _ordenarDecrescente() {
+    setState(() {
+      _apartamentos.sort((a, b) {
+        final chaveB = _extrairChaveOrdem(b);
+        final chaveA = _extrairChaveOrdem(a);
+        if (chaveA == 0 && chaveB == 0) return a.compareTo(b);
+        if (chaveA == 0) return 1;
+        if (chaveB == 0) return -1;
+        return chaveB.compareTo(chaveA);
+      });
+    });
+  }
+
   // Leituristas
   List<Map<String, dynamic>> _leituristasDisponiveis = [];
   List<String> _leituristasVinculados = []; // UIDs
@@ -400,15 +410,13 @@ class _TelaFormularioPredioState extends State<TelaFormularioPredio> {
   }
 
   Future<void> _carregarApartamentos() async {
-    if (!_isEditing) return;
-    final snapshot = await FirebaseFirestore.instance
-        .collection('predios')
-        .doc(widget.predioId!)
-        .collection('apartamentos')
-        .get();
+    if (!_isEditing || widget.predioData == null) return;
+    final apartamentos = widget.predioData!['apartamentos'];
     if (mounted) {
       setState(() {
-        _apartamentos = snapshot.docs.map((doc) => doc.id).toList()..sort();
+        _apartamentos = apartamentos != null && apartamentos is List
+            ? List<String>.from(apartamentos.map((e) => e.toString()))
+            : [];
       });
     }
   }
@@ -439,6 +447,12 @@ class _TelaFormularioPredioState extends State<TelaFormularioPredio> {
       double limite =
           double.tryParse(_limiteConsumoCtrl.text.replaceAll(',', '.')) ?? 1.0;
 
+      // Montar array de tipos de medição para compatibilidade com leiturista
+      List<String> tiposMedicao = [];
+      if (_temAgua) tiposMedicao.add('Agua');
+      if (_temGas) tiposMedicao.add('Gas');
+      if (_temEletricidade) tiposMedicao.add('Luz');
+
       final dadosPredio = {
         'admin_id': widget.adminId,
         'id_administradora': widget.adminId,
@@ -450,8 +464,10 @@ class _TelaFormularioPredioState extends State<TelaFormularioPredio> {
         'tem_medidor_agua': _temAgua,
         'tem_medidor_gas': _temGas,
         'tem_medidor_eletricidade': _temEletricidade,
+        'tipos_medicao': tiposMedicao,
         'leituristas_permitidos': _leituristasVinculados,
         'leiturista_nome': _leituristasNomes.join(', '),
+        'apartamentos': _apartamentos,
         'data_cadastro': _isEditing
             ? widget.predioData!['data_cadastro']
             : FieldValue.serverTimestamp(),
@@ -464,24 +480,11 @@ class _TelaFormularioPredioState extends State<TelaFormularioPredio> {
             .collection('predios')
             .doc(widget.predioId!);
         await predioRef.update(dadosPredio);
-        // AQUI IRIA A LÓGICA PARA ATUALIZAR APARTAMENTOS (se necessário)
       } else {
         // MODO CADASTRO
-        final predioRef = await FirebaseFirestore.instance
+        await FirebaseFirestore.instance
             .collection('predios')
             .add(dadosPredio);
-
-        if (_apartamentos.isNotEmpty) {
-          final batch = FirebaseFirestore.instance.batch();
-          for (final ap in _apartamentos) {
-            final apRef = predioRef.collection('apartamentos').doc(ap);
-            batch.set(apRef, {
-              'nome': ap,
-              'data_cadastro': FieldValue.serverTimestamp(),
-            });
-          }
-          await batch.commit();
-        }
       }
 
       if (mounted) {
@@ -603,6 +606,11 @@ class _TelaFormularioPredioState extends State<TelaFormularioPredio> {
                 Row(
                   children: [
                     TextButton.icon(
+                      icon: const Icon(Icons.sort, size: 18),
+                      label: const Text('Reordenar', style: TextStyle(fontSize: 13)),
+                      onPressed: _apartamentos.isEmpty ? null : _ordenarDecrescente,
+                    ),
+                    TextButton.icon(
                       icon: const Icon(Icons.file_upload_outlined, size: 18),
                       label: const Text('Importar', style: TextStyle(fontSize: 13)),
                       onPressed: _mostrarDialogoImportacao,
@@ -612,12 +620,7 @@ class _TelaFormularioPredioState extends State<TelaFormularioPredio> {
               ],
             ),
             const SizedBox(height: 8),
-            if (!_isEditing) _buildGerenciadorApartamentos(),
-            if (_isEditing)
-              const Text(
-                'A gestao de apartamentos (adicionar/remover) deve ser feita em uma ferramenta dedicada para evitar inconsistencias com leituras existentes.',
-                style: TextStyle(color: Colors.grey),
-              ),
+            _buildGerenciadorApartamentos(),
             const SizedBox(height: 24),
             const Text(
               'Leituristas Vinculados (max. 4)',
@@ -660,6 +663,15 @@ class _TelaFormularioPredioState extends State<TelaFormularioPredio> {
                     labelText: 'Nº ou Nome do Apartamento',
                     border: InputBorder.none,
                   ),
+                  onSubmitted: (_) {
+                    final ap = _apartamentoCtrl.text.trim();
+                    if (ap.isNotEmpty && !_apartamentos.contains(ap)) {
+                      setState(() {
+                        _apartamentos.add(ap);
+                        _apartamentoCtrl.clear();
+                      });
+                    }
+                  },
                 ),
               ),
               IconButton(
@@ -669,7 +681,6 @@ class _TelaFormularioPredioState extends State<TelaFormularioPredio> {
                   if (ap.isNotEmpty && !_apartamentos.contains(ap)) {
                     setState(() {
                       _apartamentos.add(ap);
-                      _apartamentos.sort();
                       _apartamentoCtrl.clear();
                     });
                   }
@@ -680,21 +691,33 @@ class _TelaFormularioPredioState extends State<TelaFormularioPredio> {
           const Divider(),
           _apartamentos.isEmpty
               ? const Text('Nenhum apartamento adicionado')
-              : Wrap(
-                  spacing: 8.0,
-                  runSpacing: 4.0,
-                  children: _apartamentos
-                      .map(
-                        (ap) => Chip(
-                          label: Text(ap),
-                          onDeleted: () {
-                            setState(() {
-                              _apartamentos.remove(ap);
-                            });
-                          },
-                        ),
-                      )
-                      .toList(),
+              : ReorderableListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: _apartamentos.length,
+                  onReorder: (oldIndex, newIndex) {
+                    setState(() {
+                      if (newIndex > oldIndex) newIndex--;
+                      final item = _apartamentos.removeAt(oldIndex);
+                      _apartamentos.insert(newIndex, item);
+                    });
+                  },
+                  itemBuilder: (context, index) {
+                    return ListTile(
+                      key: ValueKey('apto_$index-${_apartamentos[index]}'),
+                      dense: true,
+                      leading: Icon(Icons.drag_handle, color: Colors.grey.shade400, size: 20),
+                      title: Text(_apartamentos[index]),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.close, color: Colors.redAccent, size: 20),
+                        onPressed: () {
+                          setState(() {
+                            _apartamentos.removeAt(index);
+                          });
+                        },
+                      ),
+                    );
+                  },
                 ),
         ],
       ),
@@ -727,9 +750,11 @@ class _TelaFormularioPredioState extends State<TelaFormularioPredio> {
                   .map((e) => e.trim())
                   .where((e) => e.isNotEmpty);
               setState(() {
-                _apartamentos.addAll(linhas);
-                // Remove duplicados e ordena
-                _apartamentos = _apartamentos.toSet().toList()..sort();
+                for (final l in linhas) {
+                  if (!_apartamentos.contains(l)) {
+                    _apartamentos.add(l);
+                  }
+                }
               });
               Navigator.pop(ctx);
             },
@@ -850,19 +875,6 @@ class _TelaFormularioPredioState extends State<TelaFormularioPredio> {
     if (confirmar == true) {
       setState(() => _isLoading = true);
       try {
-        // Excluir subcoleção de apartamentos
-        final apartamentos = await FirebaseFirestore.instance
-            .collection('predios')
-            .doc(widget.predioId!)
-            .collection('apartamentos')
-            .get();
-        final batch = FirebaseFirestore.instance.batch();
-        for (final doc in apartamentos.docs) {
-          batch.delete(doc.reference);
-        }
-        await batch.commit();
-
-        // Excluir o prédio
         await FirebaseFirestore.instance
             .collection('predios')
             .doc(widget.predioId!)
