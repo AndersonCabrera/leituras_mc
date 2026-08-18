@@ -9,6 +9,7 @@ import 'dart:io' as io;
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import '../../services/banco_local.dart';
+import '../../services/upload_foto_service.dart';
 import 'tela_sincronizacao.dart';
 import 'tela_leitura_page_view.dart';
 import '../auth/tela_login.dart';

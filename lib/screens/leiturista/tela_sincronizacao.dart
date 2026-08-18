@@ -8,6 +8,7 @@ import 'dart:io' as io;
 import 'dart:typed_data';
 import 'dart:math';
 import '../../services/banco_local.dart';
+import '../../services/upload_foto_service.dart';
 
 class TelaSincronizacao extends StatefulWidget {
   final String idAdministradora;
@@ -130,45 +131,22 @@ class _TelaSincronizacaoState extends State<TelaSincronizacao> {
           } else {
             while (tentativas < maxTentativas && urlFotoFirebase == null) {
               try {
-                // Force token refresh before long upload
-                debugPrint('🔍 [SYNC] Refreshing auth token...');
-                final token = await user.getIdToken(true);
-                debugPrint('🔍 [SYNC] Token refreshed: ${token != null ? "OK" : "NULL"}');
-
-                final base64Str = caminhoLocal.replaceAll('base64:', '');
-                debugPrint('🔍 [SYNC] Base64 length: ${base64Str.length}');
-                final Uint8List imageBytes = base64Decode(base64Str);
-                debugPrint('🔍 [SYNC] Decoded bytes length: ${imageBytes.length} (${(imageBytes.length / 1024).toStringAsFixed(1)} KB)');
-
-                if (imageBytes.length > 10 * 1024 * 1024) {
-                  throw Exception('Imagem muito grande: ${imageBytes.length} bytes (max 10MB)');
-                }
-
+                debugPrint('🔍 [SYNC] Iniciando upload via Vercel (Admin SDK)...');
+                final base64Str = caminhoLocal; // já vem com prefixo "base64:"
                 final timestamp = DateTime.now().millisecondsSinceEpoch;
                 final fileName = 'foto_$timestamp.jpg';
                 debugPrint('🔍 [SYNC] Uploading file: $fileName');
-                final ref = FirebaseStorage.instance.ref().child('comprovantes/$fileName');
-                debugPrint('🔍 [SYNC] Ref path: ${ref.fullPath}');
-                debugPrint('🔍 [SYNC] Starting putData...');
-                final tarefa = await ref.putData(
-                  imageBytes,
-                  SettableMetadata(contentType: 'image/jpeg'),
-                ).timeout(const Duration(seconds: 120));
-                debugPrint('🔍 [SYNC] Upload complete, state: ${tarefa.state}, getting download URL...');
-                urlFotoFirebase = await tarefa.ref.getDownloadURL();
+
+                urlFotoFirebase = await UploadFotoService.uploadBase64(
+                  base64: base64Str,
+                  fileName: fileName,
+                  contentType: 'image/jpeg',
+                );
                 debugPrint('🔍 [SYNC] Download URL: $urlFotoFirebase');
-              } on FirebaseException catch (e) {
-                ultimoErro = '[${e.code}] ${e.message}';
-                tentativas++;
-                debugPrint("🔴 [SYNC] FirebaseException (base64, tentativa $tentativas/$maxTentativas): $ultimoErro");
-                if (tentativas < maxTentativas) {
-                  final delay = Duration(seconds: (pow(2, tentativas) * 3 + Random().nextInt(5)).toInt());
-                  await Future.delayed(delay);
-                }
               } catch (e) {
                 ultimoErro = e.toString();
                 tentativas++;
-                debugPrint("🔴 [SYNC] Generic Exception (base64, tentativa $tentativas/$maxTentativas): $ultimoErro");
+                debugPrint("🔴 [SYNC] Erro upload Vercel (tentativa $tentativas/$maxTentativas): $ultimoErro");
                 if (tentativas < maxTentativas) {
                   final delay = Duration(seconds: (pow(2, tentativas) * 3 + Random().nextInt(5)).toInt());
                   await Future.delayed(delay);
