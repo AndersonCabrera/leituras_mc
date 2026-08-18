@@ -50,6 +50,6 @@ module.exports = async (req, res) => {
     return res.status(200).json({ downloadUrl });
   } catch (error) {
     console.error('Erro no upload via Admin SDK:', error.message);
-    return res.status(500).json({ error: 'Erro interno no servidor.' });
+    return res.status(500).json({ error: error.message || 'Erro interno no servidor.' });
   }
 };

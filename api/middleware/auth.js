@@ -13,6 +13,7 @@ function getFirebaseAdmin() {
             ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
             : undefined,
         }),
+        storageBucket: process.env.FIREBASE_STORAGE_BUCKET || 'leituras-mc.firebasestorage.app',
       });
     }
     firebaseAdmin = admin;
