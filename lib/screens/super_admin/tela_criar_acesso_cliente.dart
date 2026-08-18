@@ -69,7 +69,7 @@ class _TelaCriarAcessoClienteState extends State<TelaCriarAcessoCliente> {
 
       final response = await http
           .post(
-            Uri.parse('${AppConfig.vercelApiUrl}/criarUsuario'),
+            Uri.parse('${AppConfig.vercelApiUrl}/usuarios?action=criar'),
             headers: {
               'Content-Type': 'application/json',
               'Authorization': 'Bearer $idToken',

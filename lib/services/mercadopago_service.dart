@@ -12,7 +12,7 @@ class MercadoPagoService {
   }) async {
     try {
       final response = await http.post(
-        Uri.parse('$_baseUrl/criar-assinatura'),
+        Uri.parse('$_baseUrl/assinaturas?action=criar'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'id_administradora': idAdministradora,
@@ -36,7 +36,7 @@ class MercadoPagoService {
   }) async {
     try {
       final response = await http.get(
-        Uri.parse('$_baseUrl/status-assinatura?id_administradora=$idAdministradora'),
+        Uri.parse('$_baseUrl/assinaturas?action=status&id_administradora=$idAdministradora'),
       );
       if (response.statusCode == 200) {
         return jsonDecode(response.body) as Map<String, dynamic>;
@@ -52,7 +52,7 @@ class MercadoPagoService {
   }) async {
     try {
       final response = await http.post(
-        Uri.parse('$_baseUrl/gerar-fatura'),
+        Uri.parse('$_baseUrl/assinaturas?action=gerar-fatura'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'id_administradora': idAdministradora,
@@ -73,7 +73,7 @@ class MercadoPagoService {
   }) async {
     try {
       final response = await http.post(
-        Uri.parse('$_baseUrl/cancelar-assinatura'),
+        Uri.parse('$_baseUrl/assinaturas?action=cancelar'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'id_administradora': idAdministradora,

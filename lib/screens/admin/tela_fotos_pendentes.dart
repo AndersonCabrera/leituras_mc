@@ -8,6 +8,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:math';
 import 'package:path_provider/path_provider.dart';
+import '../../services/upload_foto_service.dart';
 
 class TelaFotosPendentes extends StatefulWidget {
   final String idAdministradora;
@@ -56,45 +57,15 @@ while (tentativa < maxTentativas && urlFotoFirebase == null) {
                 break;
               }
             } else {
-              // Verificar auth state
-              final user = FirebaseAuth.instance.currentUser;
-              debugPrint('🔍 [RETRY] User: ${user?.uid}, Email: ${user?.email}');
-              if (user == null) {
-                erroMsg = 'Usuário não autenticado (retry)';
-                break;
-              }
-              
               final base64Str = caminhoLocal.replaceAll('base64:', '');
-              debugPrint('🔍 [RETRY] Base64 length: ${base64Str.length}');
-              final Uint8List imageBytes = base64Decode(base64Str);
-              debugPrint('🔍 [RETRY] Decoded bytes length: ${imageBytes.length} (${(imageBytes.length / 1024).toStringAsFixed(1)} KB)');
-              
-              if (imageBytes.length > 10 * 1024 * 1024) {
-                erroMsg = 'Imagem muito grande: ${imageBytes.length} bytes (max 10MB)';
-                break;
-              }
-              
               final timestamp = DateTime.now().millisecondsSinceEpoch;
               final fileName = 'foto_$timestamp.jpg';
-              debugPrint('🔍 [RETRY] Uploading file: $fileName');
-              final ref = FirebaseStorage.instance.ref().child('comprovantes/$fileName');
-              debugPrint('🔍 [RETRY] Ref path: ${ref.fullPath}');
-              
-              // Force token refresh
-              debugPrint('🔍 [RETRY] Refreshing auth token...');
-              final token = await user.getIdToken(true);
-              debugPrint('🔍 [RETRY] Token refreshed: ${token != null ? "OK" : "NULL"}');
-              
-              debugPrint('🔍 [RETRY] Starting putData...');
-              final tarefa = await ref
-                  .putData(
-                    imageBytes,
-                    SettableMetadata(contentType: 'image/jpeg'),
-                  )
-                  .timeout(const Duration(seconds: 120));
-              debugPrint('🔍 [RETRY] Upload complete, state: ${tarefa.state}, getting download URL...');
-              urlFotoFirebase = await tarefa.ref.getDownloadURL();
-              debugPrint('🔍 [RETRY] Download URL: $urlFotoFirebase');
+              debugPrint('🔍 [RETRY] Upload via Vercel: $fileName (${base64Str.length} chars)');
+              urlFotoFirebase = await UploadFotoService.uploadBase64(
+                base64: base64Str,
+                fileName: fileName,
+              );
+              debugPrint('✅ [RETRY] Upload OK: $urlFotoFirebase');
             }
           } on FirebaseException catch (e) {
             erroMsg = '[${e.code}] ${e.message}';

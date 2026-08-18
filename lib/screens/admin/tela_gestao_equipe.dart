@@ -16,7 +16,7 @@ class TelaListaEquipe extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const String vercelApiUrl =
-        'https://leituras-mc.vercel.app/api/excluirUsuario';
+        'https://leituras-mc.vercel.app/api/usuarios?action=excluir';
 
     Future<void> excluirLeiturista(String userId, String userName) async {
       bool? confirmar = await showDialog<bool>(
@@ -551,7 +551,7 @@ class _TelaCadastroLeituristaState extends State<TelaCadastroLeiturista> {
 
       final response = await http
           .post(
-            Uri.parse('${AppConfig.vercelApiUrl}/criarUsuario'),
+            Uri.parse('${AppConfig.vercelApiUrl}/usuarios?action=criar'),
             headers: {
               'Content-Type': 'application/json',
               'Authorization': 'Bearer $idToken',

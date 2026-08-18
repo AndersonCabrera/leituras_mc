@@ -134,46 +134,15 @@ class _TelaCondominiosState extends State<TelaCondominios>
                   break; // Não retry se arquivo não existe
                 }
               } else {
-                // Verificar auth state antes de tentar
-                final user = FirebaseAuth.instance.currentUser;
-                debugPrint('🔍 [SILENT SYNC] User: ${user?.uid}, Email: ${user?.email}');
-                if (user == null) {
-                  debugPrint('🔴 [SILENT SYNC] ERRO: Usuário não autenticado!');
-                  erroUploadFoto = 'Usuário não autenticado';
-                  break;
-                }
-                
                 final base64Str = caminhoLocal.replaceAll('base64:', '');
-                debugPrint('🔍 [SILENT SYNC] Base64 length: ${base64Str.length}');
-                final Uint8List imageBytes = base64Decode(base64Str);
-                debugPrint('🔍 [SILENT SYNC] Decoded bytes length: ${imageBytes.length} (${(imageBytes.length / 1024).toStringAsFixed(1)} KB)');
-                
-                if (imageBytes.length > 10 * 1024 * 1024) {
-                  erroUploadFoto = 'Imagem muito grande: ${imageBytes.length} bytes (max 10MB)';
-                  break;
-                }
-                
                 final timestamp = DateTime.now().millisecondsSinceEpoch;
                 final fileName = 'foto_$timestamp.jpg';
-                debugPrint('🔍 [SILENT SYNC] Uploading file: $fileName');
-                final ref = FirebaseStorage.instance.ref().child('comprovantes/$fileName');
-                debugPrint('🔍 [SILENT SYNC] Ref path: ${ref.fullPath}');
-                
-                // Force token refresh before long upload
-                debugPrint('🔍 [SILENT SYNC] Refreshing auth token...');
-                final token = await user.getIdToken(true);
-                debugPrint('🔍 [SILENT SYNC] Token refreshed: ${token != null ? "OK" : "NULL"}');
-                
-                debugPrint('🔍 [SILENT SYNC] Starting putData...');
-                final tarefa = await ref
-                    .putData(
-                      imageBytes,
-                      SettableMetadata(contentType: 'image/jpeg'),
-                    )
-                    .timeout(const Duration(seconds: 120));
-                debugPrint('🔍 [SILENT SYNC] Upload complete, state: ${tarefa.state}, getting download URL...');
-                urlFotoFirebase = await tarefa.ref.getDownloadURL();
-                debugPrint('🔍 [SILENT SYNC] Download URL: $urlFotoFirebase');
+                debugPrint('🔍 [SILENT SYNC] Upload via Vercel: $fileName (${base64Str.length} chars)');
+                urlFotoFirebase = await UploadFotoService.uploadBase64(
+                  base64: base64Str,
+                  fileName: fileName,
+                );
+                debugPrint('✅ [SILENT SYNC] Upload OK: $urlFotoFirebase');
               }
             } on FirebaseException catch (e) {
               erroUploadFoto = '[${e.code}] ${e.message}';
