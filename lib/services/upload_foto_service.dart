@@ -19,7 +19,7 @@ class UploadFotoService {
 
       final response = await http
           .post(
-            Uri.parse('${AppConfig.vercelApiUrl}/uploadFoto'),
+            Uri.parse('${AppConfig.vercelApiUrl}/uploadB2'),
             headers: {
               'Content-Type': 'application/json',
               'Authorization': 'Bearer $idToken',
