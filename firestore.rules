@@ -38,7 +38,7 @@ service cloud.firestore {
     match /usuarios/{userId} {
       allow read: if isAutenticado();
       allow create: if isAutenticado();
-      allow update, delete: if isSuperAdmin() || isGestorDaAdministradora(resource.data.id_administradora);
+      allow update, delete: if isSuperAdmin() || isGestorDaAdministradora(resource.data.id_administradora) || request.auth.uid == userId;
     }
 
     // 4. Predios — admin e super_admin podem tudo

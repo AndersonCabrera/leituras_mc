@@ -48,7 +48,7 @@ module.exports = async (req, res) => {
     const signedUrl = await getSignedUrl(
       s3,
       new GetObjectCommand({ Bucket: bucket, Key: key }),
-      { expiresIn: 31536000 }
+      { expiresIn: 604800 }
     );
 
     return res.status(200).json({ downloadUrl: signedUrl });
