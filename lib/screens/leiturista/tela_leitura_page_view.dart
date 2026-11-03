@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:convert';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -599,9 +600,9 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
   Future<void> _tirarFotoManual() async {
     final foto = await _picker.pickImage(
       source: ImageSource.camera,
-      imageQuality: 75,
-      maxWidth: 1600,
-      maxHeight: 1600,
+      imageQuality: 55,
+      maxWidth: 1200,
+      maxHeight: 1200,
       preferredCameraDevice: CameraDevice.rear,
     );
     if (foto != null) setState(() => fotoComprovante = foto);
@@ -610,9 +611,9 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
   Future<void> _abrirGaleria() async {
     final foto = await _picker.pickImage(
       source: ImageSource.gallery,
-      imageQuality: 75,
-      maxWidth: 1600,
-      maxHeight: 1600,
+      imageQuality: 55,
+      maxWidth: 1200,
+      maxHeight: 1200,
     );
     if (foto != null) setState(() => fotoComprovante = foto);
   }
@@ -707,7 +708,22 @@ class _ApartamentoLeituraPageState extends State<ApartamentoLeituraPage>
       String? caminhoFotoLocal;
       if (fotoComprovante != null) {
         final bytes = await fotoComprovante!.readAsBytes();
-        caminhoFotoLocal = 'base64:${base64Encode(bytes)}';
+        String base64Str = base64Encode(bytes);
+
+        // Validar tamanho do base64 (limite Vercel ~1MB, margem de segurança 900KB)
+        if (base64Str.length > 900_000) {
+          debugPrint('⚠️ Foto muito grande (${base64Str.length} chars base64), recomprimindo...');
+          final compressed = await FlutterImageCompress.compressWithList(
+            bytes,
+            quality: 45,
+            minWidth: 1000,
+            minHeight: 1000,
+          );
+          base64Str = base64Encode(compressed);
+          debugPrint('✅ Foto recomprimida: ${base64Str.length} chars base64');
+        }
+
+        caminhoFotoLocal = 'base64:$base64Str';
       }
 
       final leituraLocal = {
