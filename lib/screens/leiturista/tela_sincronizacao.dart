@@ -63,6 +63,7 @@ class _TelaSincronizacaoState extends State<TelaSincronizacao> {
         String itemJson = linha['dados'];
         Map<String, dynamic> dados = jsonDecode(itemJson);
         String? urlFotoFirebase;
+        String? fotoKey;
         String? caminhoLocal = dados['caminho_foto_local'];
         bool temFoto = caminhoLocal != null && caminhoLocal.isNotEmpty;
 
@@ -137,11 +138,13 @@ class _TelaSincronizacaoState extends State<TelaSincronizacao> {
                 final fileName = 'foto_$timestamp.jpg';
                 debugPrint('🔍 [SYNC] Uploading file: $fileName');
 
-                urlFotoFirebase = await UploadFotoService.uploadBase64(
+                final resultado = await UploadFotoService.uploadBase64(
                   base64: base64Str,
                   fileName: fileName,
                   contentType: 'image/jpeg',
                 );
+                urlFotoFirebase = resultado?.downloadUrl;
+                fotoKey = resultado?.fileKey;
                 debugPrint('🔍 [SYNC] Download URL: $urlFotoFirebase');
               } catch (e) {
                 ultimoErro = e.toString();
@@ -189,6 +192,7 @@ class _TelaSincronizacaoState extends State<TelaSincronizacao> {
 
         if (urlFotoFirebase != null) {
           pacoteParaNuvem['url_foto'] = urlFotoFirebase;
+          if (fotoKey != null) pacoteParaNuvem['foto_key'] = fotoKey;
         } else if (dados['tem_foto_anexada'] == true) {
           pacoteParaNuvem['erro_sincronizacao_foto'] = true;
           pacoteParaNuvem['mensagem_erro'] = dados['_erro_upload_foto'] ?? 'Foto nao sincronizada - reenvio pendente';

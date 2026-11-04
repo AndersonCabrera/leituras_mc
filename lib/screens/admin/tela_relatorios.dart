@@ -12,6 +12,7 @@ import 'dart:io' as io;
 import 'package:flutter/services.dart' show ByteData, rootBundle;
 
 import '../../models/plano.dart';
+import '../../services/foto_url_service.dart';
 
 class TelaRelatoriosBusca extends StatefulWidget {
   final String idAdministradora;
@@ -280,6 +281,12 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
           estiloCabecalho;
     }
 
+    // Pré-resolve as URLs das fotos em paralelo (7 dias por assinatura)
+    final docsDados = leituras
+        .map((d) => d.data() as Map<String, dynamic>)
+        .toList();
+    final urlsFotos = await FotoUrlService.resolverEmLote(docsDados);
+
     for (int i = 0; i < leituras.length; i++) {
       var dados = leituras[i].data() as Map<String, dynamic>;
       int rowIndex = i + 5;
@@ -296,7 +303,7 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
       double ant = (dados['leitura_anterior'] ?? 0).toDouble();
       double atual = (dados['leitura_atual'] ?? 0).toDouble();
       double cons = (dados['consumo'] ?? 0).toDouble();
-      String linkFoto = dados['url_foto'] ?? '';
+      String linkFoto = urlsFotos[i] ?? '';
       bool correcao = dados['correcao_manual'] ?? false;
       String auditoria =
           dados['status_auditoria'] ??
@@ -523,8 +530,14 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
     final pdf = pw.Document();
     List<pw.Widget> listaDeLeituras = [];
 
-    for (var doc in leituras) {
-      var dados = doc.data() as Map<String, dynamic>;
+    // Pré-resolve as URLs das fotos em paralelo (7 dias por assinatura)
+    final docsDados = leituras
+        .map((d) => d.data() as Map<String, dynamic>)
+        .toList();
+    final urlsFotos = await FotoUrlService.resolverEmLote(docsDados);
+
+    for (int i = 0; i < leituras.length; i++) {
+      var dados = docsDados[i];
       String dataStr = '-';
       if (dados['data_hora'] != null) {
         DateTime data = (dados['data_hora'] as Timestamp).toDate();
@@ -533,10 +546,10 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
       }
 
       pw.ImageProvider? imagemPdf;
-      if (dados['url_foto'] != null &&
-          dados['url_foto'].toString().isNotEmpty) {
+      final urlFotoPdf = urlsFotos[i];
+      if (urlFotoPdf != null && urlFotoPdf.isNotEmpty) {
         try {
-          imagemPdf = await networkImage(dados['url_foto']);
+          imagemPdf = await networkImage(urlFotoPdf);
         } catch (e) {
           debugPrint('Foto de auditoria indisponível.');
         }
@@ -1095,7 +1108,7 @@ class _TelaRelatoriosPredioState extends State<TelaRelatoriosPredio> {
                               ),
                             ),
                             DataCell(
-                              dados['url_foto'] != null
+                              FotoUrlService.temFoto(dados)
                                   ? const Icon(Icons.image, color: Colors.blue)
                                   : const Text('-'),
                             ),

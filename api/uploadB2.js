@@ -51,7 +51,7 @@ module.exports = async (req, res) => {
       { expiresIn: 604800 }
     );
 
-    return res.status(200).json({ downloadUrl: signedUrl });
+    return res.status(200).json({ downloadUrl: signedUrl, fileKey: key });
   } catch (error) {
     console.error('Erro upload B2:', error.message);
     return res.status(500).json({ error: error.message || 'Erro interno no servidor.' });

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../services/foto_url_service.dart';
+import '../../widgets/foto_leitura.dart';
 
 class TelaAuditoria extends StatelessWidget {
   final String idAdministradora;
@@ -73,13 +75,13 @@ class TelaAuditoria extends StatelessWidget {
                         children: [
                           GestureDetector(
                             onTap: () {
-                              if (dados['url_foto'] != null) {
+                              if (FotoUrlService.temFoto(dados)) {
                                 showDialog(
                                   context: context,
                                   builder: (_) => Dialog(
                                     child: InteractiveViewer(
-                                      child: Image.network(
-                                        dados['url_foto'],
+                                      child: FotoLeituraImagem(
+                                        dados: dados,
                                         fit: BoxFit.contain,
                                       ),
                                     ),
@@ -95,26 +97,7 @@ class TelaAuditoria extends StatelessWidget {
                                 );
                               }
                             },
-                            child: Container(
-                              width: 90,
-                              height: 90,
-                              decoration: BoxDecoration(
-                                color: Colors.grey.shade200,
-                                borderRadius: BorderRadius.circular(8),
-                                image: dados['url_foto'] != null
-                                    ? DecorationImage(
-                                        image: NetworkImage(dados['url_foto']),
-                                        fit: BoxFit.cover,
-                                      )
-                                    : null,
-                              ),
-                              child: dados['url_foto'] == null
-                                  ? const Icon(
-                                      Icons.hourglass_bottom_rounded,
-                                      color: Colors.grey,
-                                    )
-                                  : null,
-                            ),
+                            child: FotoLeituraThumbnail(dados: dados),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
@@ -151,7 +134,7 @@ class TelaAuditoria extends StatelessWidget {
                                   ),
                                 ),
                                 const SizedBox(height: 4),
-                                if (dados['url_foto'] != null)
+                                if (FotoUrlService.temFoto(dados))
                                   Row(
                                     children: [
                                       Icon(Icons.check_circle, size: 14, color: Colors.green.shade700),

@@ -28,6 +28,7 @@ class _TelaFotosPendentesState extends State<TelaFotosPendentes> {
 
     try {
       String? urlFotoFirebase;
+      String? fotoKey;
       String? caminhoLocal = dados['caminho_foto_local'];
       String erroMsg = '';
 
@@ -61,10 +62,12 @@ while (tentativa < maxTentativas && urlFotoFirebase == null) {
               final timestamp = DateTime.now().millisecondsSinceEpoch;
               final fileName = 'foto_$timestamp.jpg';
               debugPrint('🔍 [RETRY] Upload via Vercel: $fileName (${base64Str.length} chars)');
-              urlFotoFirebase = await UploadFotoService.uploadBase64(
+              final resultado = await UploadFotoService.uploadBase64(
                 base64: base64Str,
                 fileName: fileName,
               );
+              urlFotoFirebase = resultado?.downloadUrl;
+              fotoKey = resultado?.fileKey;
               debugPrint('✅ [RETRY] Upload OK: $urlFotoFirebase');
             }
           } on FirebaseException catch (e) {
@@ -93,6 +96,7 @@ while (tentativa < maxTentativas && urlFotoFirebase == null) {
             .doc(docId)
             .update({
           'url_foto': urlFotoFirebase,
+          if (fotoKey != null) 'foto_key': fotoKey,
           'erro_sincronizacao_foto': false,
           'mensagem_erro': FieldValue.delete(),
         });
@@ -165,11 +169,12 @@ while (tentativa < maxTentativas && urlFotoFirebase == null) {
             );
           }
 
-          // Filtrar: fotos com erro OU sem url_foto
+          // Filtrar: fotos com erro OU sem url_foto (nem foto_key)
           var fotosComProblema = snapshot.data!.docs.where((doc) {
             var dados = doc.data() as Map<String, dynamic>;
             bool temErro = dados['erro_sincronizacao_foto'] == true;
-            bool semUrl = dados['url_foto'] == null || dados['url_foto'] == '';
+            bool semUrl = (dados['url_foto'] == null || dados['url_foto'] == '') &&
+                (dados['foto_key'] == null || dados['foto_key'] == '');
             return temErro || semUrl;
           }).toList();
 

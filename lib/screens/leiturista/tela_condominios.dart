@@ -104,6 +104,7 @@ class _TelaCondominiosState extends State<TelaCondominios>
 
       try {
         String? urlFotoFirebase;
+        String? fotoKey;
         String? caminhoLocal = dados['caminho_foto_local'];
         String? erroUploadFoto;
 
@@ -138,10 +139,12 @@ class _TelaCondominiosState extends State<TelaCondominios>
                 final timestamp = DateTime.now().millisecondsSinceEpoch;
                 final fileName = 'foto_$timestamp.jpg';
                 debugPrint('🔍 [SILENT SYNC] Upload via Vercel: $fileName (${base64Str.length} chars)');
-                urlFotoFirebase = await UploadFotoService.uploadBase64(
+                final resultado = await UploadFotoService.uploadBase64(
                   base64: base64Str,
                   fileName: fileName,
                 );
+                urlFotoFirebase = resultado?.downloadUrl;
+                fotoKey = resultado?.fileKey;
                 debugPrint('✅ [SILENT SYNC] Upload OK: $urlFotoFirebase');
               }
             } on FirebaseException catch (e) {
@@ -196,6 +199,7 @@ class _TelaCondominiosState extends State<TelaCondominios>
 
         if (urlFotoFirebase != null) {
           pacote['url_foto'] = urlFotoFirebase;
+          if (fotoKey != null) pacote['foto_key'] = fotoKey;
         } else if (dados['tem_foto_anexada'] == true) {
           pacote['erro_sincronizacao_foto'] = true;
           pacote['mensagem_erro'] = dados['_erro_upload_foto'] ?? 'Foto nao sincronizada - reenvio pendente';
